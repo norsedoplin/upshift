@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UpShift</title>
+    <meta name="description" content="A minimalist manual car sim in your browser. Feel the clutch bite." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="message"></div>
+
+    <div id="pedals" title="Clutch · Brake · Gas">
+      <div class="pedal"><div id="bar-clutch" class="bar"></div><span>C</span></div>
+      <div class="pedal"><div id="bar-brake" class="bar"></div><span>B</span></div>
+      <div class="pedal"><div id="bar-throttle" class="bar"></div><span>G</span></div>
+    </div>
+
+    <div id="pad-status"></div>
+
+    <div id="hint">
+      <b>DualSense</b> L2 clutch · R2 gas · right stick ↓ brake · L1/R1 shift · △ ignition · ✕ handbrake · D-pad ↑ debug
+      <br />
+      <b>Keyboard</b> Space clutch (hold Shift to release slowly) · W gas · S brake · Q/E shift · I ignition · X handbrake · ` debug
+    </div>
+
+    <div id="debug" class="hidden">
+      <pre id="debug-text"></pre>
+      <canvas id="bite" width="220" height="70"></canvas>
+      <div class="caption">clutch torque vs pedal (released →)</div>
+    </div>
+
+    <div id="overlay">
+      <div class="card">
+        <h1>UpShift</h1>
+        <p class="tag">A manual car. Feel the clutch bite.</p>
+        <p>Plug in or pair your controller, then click to start. Chrome or Edge recommended for rumble.</p>
+        <ol>
+          <li>Start the engine with △.</li>
+          <li>Hold L2 (clutch in) and press R1 for first gear.</li>
+          <li>Ease off L2 slowly with a little R2. Feel for the bite.</li>
+        </ol>
+        <button>Click to start</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

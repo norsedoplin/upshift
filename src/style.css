@@ -1,0 +1,174 @@
+:root {
+  --ink: #f4f1e8;
+  --muted: rgba(244, 241, 232, 0.65);
+  --accent: #ff7a3d;
+  --panel: rgba(22, 23, 27, 0.72);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #16171b;
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+}
+
+#app canvas {
+  display: block;
+}
+
+.hidden {
+  display: none !important;
+}
+
+#message {
+  position: fixed;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--panel);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  white-space: nowrap;
+}
+#message.visible {
+  opacity: 1;
+}
+
+#pedals {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--panel);
+}
+.pedal {
+  position: relative;
+  width: 12px;
+  height: 70px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.pedal span {
+  position: absolute;
+  bottom: 2px;
+  width: 100%;
+  text-align: center;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.bar {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  background: var(--ink);
+}
+.bar.bite {
+  background: var(--accent);
+}
+
+#pad-status {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#hint {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: min(760px, calc(100% - 32px));
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+  color: var(--muted);
+  background: var(--panel);
+  padding: 8px 14px;
+  border-radius: 10px;
+}
+#hint b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+#debug {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 11px;
+}
+#debug pre {
+  margin: 0 0 8px;
+  font-family: ui-monospace, Menlo, monospace;
+}
+#debug .caption {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(22, 23, 27, 0.55);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  padding: 16px;
+}
+.card {
+  max-width: 420px;
+  padding: 28px 30px;
+  border-radius: 16px;
+  background: rgba(22, 23, 27, 0.9);
+  line-height: 1.5;
+}
+.card h1 {
+  margin: 0;
+  font-size: 34px;
+  letter-spacing: -0.02em;
+}
+.card .tag {
+  margin-top: 2px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.card p,
+.card li {
+  color: var(--muted);
+  font-size: 14px;
+}
+.card button {
+  margin-top: 10px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #16171b;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
