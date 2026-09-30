@@ -25,6 +25,7 @@ export interface Cockpit {
   eye: THREE.Vector3; // resting head position inside head's parent
   wheel: THREE.Group;
   shifter: THREE.Group;
+  charm: THREE.Group; // hangs from the mirror
   cluster: THREE.CanvasTexture;
   clusterCanvas: HTMLCanvasElement;
   clutchPedal: THREE.Mesh;
@@ -138,8 +139,8 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   }
 
   // ---- Pillars, roof, mirror, visors ----
-  box(0.05, 0.8, 0.07, interior, -0.8, 1.28, -0.78, 0.72, 0, 0.04);
-  box(0.05, 0.8, 0.07, interior, 0.8, 1.28, -0.78, 0.72, 0, -0.04);
+  box(0.09, 0.8, 0.1, interior, -0.8, 1.28, -0.78, 0.72, 0, 0.04);
+  box(0.09, 0.8, 0.1, interior, 0.8, 1.28, -0.78, 0.72, 0, -0.04);
   box(1.74, 0.06, 1.9, interiorLight, 0, 1.6, 0.45); // headliner, front to back
   for (const side of [-1, 1]) {
     box(0.08, 0.66, 0.12, interior, side * 0.84, 1.28, 0.78); // B-pillar
@@ -147,10 +148,26 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   }
   box(1.7, 0.06, 0.5, interior, 0, 0.98, 1.45); // parcel shelf
   box(1.74, 0.62, 0.05, interiorLight, 0, 1.3, 1.72); // rear window frame / bulkhead
-  box(0.02, 0.06, 0.02, dark, 0.02, 1.55, -0.47);
-  box(0.24, 0.07, 0.03, dark, 0.02, 1.5, -0.48);
-  box(0.2, 0.05, 0.005, mirror, 0.02, 1.5, -0.464);
-  for (const x of [-0.42, 0.42]) box(0.5, 0.02, 0.2, interiorLight, x, 1.565, -0.46, 0.25);
+  // The roof comes down to meet the top of the windscreen, so from the seat you see a
+  // band of headliner, the visors and the mirror across the top of the view.
+  box(1.74, 0.08, 0.5, interior, 0, 1.5, -0.62, 0.18); // header over the windscreen
+  box(1.62, 0.014, 0.014, accent, 0, 1.455, -0.86); // seam where it meets the glass
+  box(0.04, 0.16, 0.04, dark, 0.02, 1.42, -0.72); // mirror stalk
+  box(0.26, 0.075, 0.035, dark, 0.02, 1.34, -0.72);
+  box(0.22, 0.055, 0.005, mirror, 0.02, 1.34, -0.7);
+  // Visors: the driver's is flipped halfway down.
+  box(0.5, 0.025, 0.22, interiorLight, -0.42, 1.42, -0.7, 0.55);
+  box(0.5, 0.025, 0.22, interiorLight, 0.42, 1.455, -0.68, 0.2);
+  box(0.12, 0.004, 0.08, mat('#c9c3b4'), -0.5, 1.405, -0.66, 0.55); // vanity mirror cover
+  // A lucky charm (omamori) on a cord from the mirror; main.ts swings it through corners.
+  const charm = new THREE.Group();
+  charm.position.set(0.02, 1.3, -0.72);
+  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.002, 0.002, 0.14, 4).translate(0, -0.07, 0), mat('#e8c34a'));
+  const pouch = new THREE.Mesh(new RoundedBoxGeometry(0.045, 0.07, 0.012, 2, 0.005).translate(0, -0.175, 0), mat('#b8201c', '#1a0303', 0.55));
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.035, 0.014).translate(0, -0.17, 0), mat('#f2d27a', undefined, 0.4, 0.3));
+  const knot = new THREE.Mesh(new THREE.IcosahedronGeometry(0.008, 0).translate(0, -0.14, 0), mat('#e8c34a'));
+  charm.add(cord, pouch, panel, knot);
+  cabin.add(charm);
 
   // ---- Doors ----
   for (const side of [-1, 1]) {
@@ -199,8 +216,8 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   // Every car gets an aftermarket three-spoke deep-dish wheel: a fat suede rim, black
   // slotted spokes that dip forward to a recessed hub, and a stripe at twelve o'clock.
   const wheel = new THREE.Group();
-  const radius = 0.175;
-  const grip = 0.022;
+  const radius = 0.2;
+  const grip = 0.025;
   const dish = 0.075; // how far the hub sits behind the rim
   const suede = mat('#18191b', undefined, 1);
   const anodised = mat('#1f2023', undefined, 0.35, 0.6);
@@ -262,14 +279,15 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   const stripe = new THREE.Mesh(new THREE.TorusGeometry(radius, grip * 1.04, 14, 6, 0.1).rotateZ(Math.PI / 2 - 0.05), yellow);
   wheel.add(stripe);
   const wheelMount = new THREE.Group();
-  wheelMount.position.set(-0.37, 0.76, -0.4);
-  wheelMount.rotation.x = -0.45;
+  // High enough that you look at the dials through the top of the wheel, like a real car.
+  wheelMount.position.set(-0.37, 0.94, -0.37);
+  wheelMount.rotation.x = -0.4;
   wheelMount.add(wheel);
   cabin.add(wheelMount);
   // Steering column and indicator/wiper stalks.
-  add(new THREE.CylinderGeometry(0.04, 0.05, 0.22, 16).rotateX(Math.PI / 2 - 0.45), interior, -0.37, 0.72, -0.5);
-  bar(v(-0.4, 0.73, -0.47), v(-0.55, 0.72, -0.47), 0.006, dark);
-  bar(v(-0.34, 0.73, -0.47), v(-0.19, 0.72, -0.47), 0.006, dark);
+  add(new THREE.CylinderGeometry(0.04, 0.05, 0.26, 16).rotateX(Math.PI / 2 - 0.4), interior, -0.37, 0.88, -0.52);
+  bar(v(-0.42, 0.89, -0.47), v(-0.6, 0.88, -0.47), 0.007, dark);
+  bar(v(-0.32, 0.89, -0.47), v(-0.14, 0.88, -0.47), 0.007, dark);
 
   // ---- Roll cage ----
   if (spec.cage) {
@@ -295,7 +313,7 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
     o.receiveShadow = true;
   });
 
-  const eye = new THREE.Vector3(-0.37, 1.2, 0.1);
+  const eye = new THREE.Vector3(-0.37, 1.2, 0.13);
   const head = new THREE.Group();
   head.position.copy(eye);
   cabin.add(head);
@@ -312,7 +330,7 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
     cluster.dispose();
   };
 
-  return { root, head, eye, wheel, shifter, cluster, clusterCanvas, clutchPedal, brakePedal, throttlePedal, paint, dispose };
+  return { root, head, eye, wheel, shifter, charm, cluster, clusterCanvas, clutchPedal, brakePedal, throttlePedal, paint, dispose };
 }
 
 /** Position of the shift knob for each gear in a 5+R H-pattern (x = across, z = fore/aft). */
