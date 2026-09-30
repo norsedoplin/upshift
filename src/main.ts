@@ -3,6 +3,7 @@ import './style.css';
 import { Car, RPM } from './sim/car';
 import { Chassis } from './sim/chassis';
 import { Input } from './input';
+import { DualSense } from './dualsense';
 import { Haptics } from './haptics';
 import { EngineAudio } from './audio';
 import { buildCockpit, shifterPose } from './cockpit';
@@ -46,6 +47,10 @@ let chassis = new Chassis(model.chassis);
 let gearSequence = [-1, 0, ...forwardGears(model.spec)];
 const input = new Input();
 const haptics = new Haptics();
+// Reconnect a DualSense the player linked on an earlier visit (no prompt needed).
+void haptics.dualsense.restore().catch(() => {});
+const dualSenseLabel = () =>
+  haptics.dualsense.connected ? `Connected (${haptics.dualsense.bluetooth ? 'Bluetooth' : 'USB'})` : 'Connect';
 const audio = new EngineAudio();
 const scorer = new Scorer();
 
@@ -86,6 +91,20 @@ const menus = new Menus(progress, {
   },
   carChanged: () => applyCar(),
   testRumble: () => haptics.test(input.gamepad()),
+  dualSense: () => ({
+    supported: DualSense.supported(),
+    label: dualSenseLabel(),
+    connect: async () => {
+      try {
+        if (!haptics.dualsense.connected) await haptics.dualsense.request();
+        return dualSenseLabel();
+      } catch (e) {
+        console.warn('DualSense connect failed', e);
+        // Browsers only show the device picker after a click or key press, not a controller button.
+        return e instanceof DOMException && e.name === 'SecurityError' ? 'Click it with the mouse' : 'Could not connect';
+      }
+    },
+  }),
   settingsChanged: () => applySettings(),
   preview: (m, paint) => {
     if (m && paint) {
@@ -428,7 +447,15 @@ function updateHud(clutch: number, brake: number, throttle: number, pad: Gamepad
 
   const hasRumble = !!(pad as unknown as { vibrationActuator?: unknown } | null)?.vibrationActuator;
   padStatus.textContent = pad
-    ? `${shortPadName(pad.id)}${hasRumble ? '' : ' · no rumble in this browser'}`
+    ? `${shortPadName(pad.id)}${
+        haptics.dualsense.connected
+          ? ' · direct rumble'
+          : hasRumble
+            ? ''
+            : DualSense.supported() && shortPadName(pad.id) === 'DualSense'
+              ? ' · no rumble yet: Settings › DualSense rumble'
+              : ' · no rumble in this browser'
+      }`
     : 'No controller: press any button on it';
   hint.classList.toggle('hidden', !progress.settings.hints || driveTime > 25);
 

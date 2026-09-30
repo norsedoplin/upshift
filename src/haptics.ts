@@ -3,6 +3,7 @@
 // and, for Xbox pads on Windows, "trigger-rumble". Everything here degrades to a no-op.
 
 import type { Car } from './sim/car';
+import { DualSense } from './dualsense';
 
 type Actuator = {
   effects?: string[];
@@ -21,6 +22,9 @@ export class Haptics {
   private lastStrong = -1;
   private lastWeak = -1;
   private t = 0;
+  /** Direct USB/Bluetooth link to a DualSense, used when the browser can't rumble it. */
+  readonly dualsense = new DualSense();
+  private testUntil = 0;
 
   stall() {
     this.impulse = Math.max(this.impulse, 1);
@@ -62,6 +66,13 @@ export class Haptics {
     const scrub = Math.max(0, Math.min(1, (tyreSlip - 0.08) / 0.2)) * (0.6 + 0.4 * Math.sin(this.t * 2 * Math.PI * 23));
     this.weak = clamp01(idle + bite * 0.3 + this.buzz * 0.9 + lug * 0.2 + scrub * 0.45);
 
+    if (this.dualsense.connected) {
+      if (performance.now() < this.testUntil) return;
+      // No pad passed means menus are open: keep the motors still.
+      const k = this.enabled && pad ? this.strength : 0;
+      this.dualsense.rumble(this.strong * k, this.weak * k);
+      return;
+    }
     if (!this.enabled || !pad || this.strength <= 0) return;
     const act = (pad as unknown as { vibrationActuator?: Actuator }).vibrationActuator;
     if (!act?.playEffect) return;
@@ -86,6 +97,13 @@ export class Haptics {
 
   /** Plays one strong pulse and says what happened, so players can tell whether their browser can rumble. */
   async test(pad: Gamepad | null): Promise<string> {
+    if (this.dualsense.connected) {
+      this.testUntil = performance.now() + 700;
+      this.dualsense.rumble(1, 1);
+      await new Promise((r) => setTimeout(r, 700));
+      this.dualsense.stop();
+      return 'Sent: felt it?';
+    }
     if (!pad) return 'No controller yet';
     const act = (pad as unknown as { vibrationActuator?: Actuator }).vibrationActuator;
     if (!act?.playEffect) return 'Not in this browser';
@@ -99,6 +117,7 @@ export class Haptics {
   }
 
   stop(pad: Gamepad | null) {
+    this.dualsense.stop();
     const act = (pad as unknown as { vibrationActuator?: Actuator } | null)?.vibrationActuator;
     act?.reset?.().catch(() => {});
   }
