@@ -26,6 +26,8 @@ export class Haptics {
   readonly dualsense = new DualSense();
   private testUntil = 0;
   private lastEngage = 1;
+  /** How fast the clutch is engaging (per second, smoothed): positive letting out, negative pushing in. */
+  private engageRate = 0;
   /** Which trigger the clutch is on (from the bindings), so it can push back at the bite point. */
   clutchTrigger: 'left' | 'right' | null = 'left';
   clutchFeel = true; // player setting
@@ -54,6 +56,12 @@ export class Haptics {
 
     // A soft thud as the clutch comes fully home, bigger for a quick release in gear.
     const engage = car.spec.clutchMaxTorque > 0 ? car.clutchCapacity / car.spec.clutchMaxTorque : 1;
+    if (dt > 0) this.engageRate += ((engage - this.lastEngage) / dt - this.engageRate) * Math.min(1, dt / 0.08);
+    // Letting the clutch out is what you feel for, so it's felt far more than pushing it in.
+    const releasing = clamp01(this.engageRate / 1.2);
+    const pressing = clamp01(-this.engageRate / 1.2);
+    // The moment it first grabs on the way out: a small knock.
+    if (this.lastEngage < 0.04 && engage >= 0.04 && this.engageRate > 0.2 && car.gear !== 0) this.impulse = Math.max(this.impulse, 0.28);
     if (this.lastEngage < 0.97 && engage >= 0.97 && dt > 0) {
       const rate = Math.min(1, (engage - this.lastEngage) / dt / 6); // full release in ~1/6 s = 1
       this.thud(0.18 + 0.3 * rate + (car.gear !== 0 ? 0.08 : 0));
@@ -65,6 +73,7 @@ export class Haptics {
     let bite = Math.min(1, slipPower / 7000) ** 0.5;
     // Clutch judder: a low shudder rather than a flat hum.
     bite *= 0.75 + 0.25 * Math.sin(this.t * 2 * Math.PI * 11);
+    bite = Math.min(1, bite * (1 + 1.1 * releasing - 0.65 * pressing));
 
     // Engine lugging under load at low rpm.
     const rpm = car.rpm;
@@ -93,7 +102,10 @@ export class Haptics {
         const firm = 1 - car.spec.biteEnd;
         const start = grab - (grab - firm) * 0.35;
         // Kept light: enough to find the bite, not a wall.
-        clutch = triggerSection(start, grab + 0.03, 0.12 * Math.min(1, 0.4 + 0.6 * k));
+        // Firmer while letting it out, barely there pushing in.
+        // Three steps rather than a smooth blend, so the pad isn't sent a new effect every frame.
+        const force = releasing > 0.15 ? 0.22 : pressing > 0.15 ? 0.05 : 0.1;
+        clutch = triggerSection(start, grab + 0.03, force * Math.min(1, 0.4 + 0.6 * k));
       }
       this.dualsense.setTriggers(this.clutchTrigger === 'left' ? clutch : TRIGGER_OFF, this.clutchTrigger === 'right' ? clutch : TRIGGER_OFF);
       this.dualsense.rumble(this.strong * k, this.weak * k);

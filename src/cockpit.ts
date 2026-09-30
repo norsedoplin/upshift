@@ -84,8 +84,11 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   }
 
   // ---- Dashboard ----
-  box(1.62, 0.06, 0.55, interior, 0, 0.9, -0.86, -0.08);
-  box(1.62, 0.3, 0.06, interiorLight, 0, 0.74, -0.6);
+  box(1.72, 0.06, 0.55, interior, 0, 0.9, -0.86, -0.08);
+  box(1.72, 0.3, 0.06, interiorLight, 0, 0.74, -0.6);
+  // Under the dash: a lower panel and the footwell wall, so there's no see-through gap to the road.
+  box(1.72, 0.34, 0.04, dark, 0, 0.43, -0.76);
+  box(1.72, 0.04, 0.2, interior, 0, 0.6, -0.68, 0.5);
   box(1.6, 0.012, 0.012, accent, 0, 0.885, -0.585); // trim line along the dash
   for (const x of [-0.72, -0.1, 0.14, 0.72]) {
     box(0.13, 0.055, 0.02, dark, x, 0.81, -0.565);
@@ -131,7 +134,13 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   // ---- Pillars, roof, mirror, visors ----
   box(0.05, 0.8, 0.07, interior, -0.8, 1.28, -0.78, 0.72, 0, 0.04);
   box(0.05, 0.8, 0.07, interior, 0.8, 1.28, -0.78, 0.72, 0, -0.04);
-  box(1.66, 0.06, 0.5, interiorLight, 0, 1.6, -0.25);
+  box(1.74, 0.06, 1.9, interiorLight, 0, 1.6, 0.45); // headliner, front to back
+  for (const side of [-1, 1]) {
+    box(0.08, 0.66, 0.12, interior, side * 0.84, 1.28, 0.78); // B-pillar
+    box(0.06, 0.66, 0.5, interior, side * 0.85, 1.28, 1.3); // rear quarter
+  }
+  box(1.7, 0.06, 0.5, interior, 0, 0.98, 1.45); // parcel shelf
+  box(1.74, 0.62, 0.05, interiorLight, 0, 1.3, 1.72); // rear window frame / bulkhead
   box(0.02, 0.06, 0.02, dark, 0.02, 1.55, -0.47);
   box(0.24, 0.07, 0.03, dark, 0.02, 1.5, -0.48);
   box(0.2, 0.05, 0.005, mirror, 0.02, 1.5, -0.464);
@@ -140,30 +149,45 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   // ---- Doors ----
   for (const side of [-1, 1]) {
     box(0.08, 0.1, 1.3, paint, side * 0.84, 0.97, 0.05); // painted sill at the window line
-    box(0.05, 0.42, 1.2, interior, side * 0.86, 0.72, 0.05);
+    box(0.05, 0.72, 1.95, interior, side * 0.86, 0.62, 0.2); // door card, down to the floor
     box(0.09, 0.05, 0.4, interiorLight, side * 0.81, 0.8, 0.12); // armrest
     box(0.02, 0.03, 0.09, metal, side * 0.83, 0.88, -0.2); // handle
     box(0.012, 0.012, 1.1, accent, side * 0.835, 0.915, 0.05);
   }
 
-  // ---- Console, handbrake, shifter ----
-  box(0.26, 0.3, 0.8, interior, 0, 0.47, -0.2);
-  box(0.03, 0.03, 0.22, interiorLight, 0.08, 0.66, 0.12, 0.22); // handbrake lever
-  box(0.04, 0.04, 0.05, dark, 0.08, 0.69, 0.22, 0.22);
+  // ---- Floor, seats ----
+  box(1.74, 0.04, 2.5, mat('#1d1e22', undefined, 1), 0, 0.27, 0.45); // carpet
+  for (const x of [-0.37, 0.39]) {
+    box(0.5, 0.13, 0.52, interiorLight, x, 0.42, 0.22); // cushion
+    box(0.5, 0.7, 0.12, interiorLight, x, 0.82, 0.52, -0.16); // backrest
+    box(0.3, 0.2, 0.1, interior, x, 1.3, 0.6, -0.16); // headrest
+    box(0.08, 0.5, 0.1, accent, x - 0.2, 0.8, 0.48, -0.16); // side bolsters
+    box(0.08, 0.5, 0.1, accent, x + 0.2, 0.8, 0.48, -0.16);
+  }
+  box(1.5, 0.35, 0.5, interiorLight, 0, 0.45, 1.2); // rear bench
+  box(1.5, 0.55, 0.12, interiorLight, 0, 0.85, 1.42, -0.12);
 
+  // ---- Console, handbrake, shifter ----
+  box(0.26, 0.34, 1.05, interior, 0, 0.45, -0.1);
+  box(0.03, 0.03, 0.22, interiorLight, 0.08, 0.66, 0.22, 0.22); // handbrake lever
+  box(0.04, 0.04, 0.05, dark, 0.08, 0.69, 0.32, 0.22);
+
+  // The lever sits forward and tall enough to see from the seat; it moves through the gate
+  // (see shifterPose and the smoothing in main.ts).
   const shifter = new THREE.Group();
-  shifter.position.set(0.02, 0.62, -0.12);
+  shifter.position.set(0.02, 0.62, -0.38);
   const tall = spec.wheel === 'four';
-  const stickLen = spec.wheel === 'dish' ? 0.15 : tall ? 0.22 : 0.2;
-  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.01, stickLen, 5), mat('#1c1d21'));
+  const stickLen = spec.wheel === 'dish' ? 0.23 : tall ? 0.28 : 0.26;
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.012, stickLen, 6), metal);
   stick.position.y = stickLen / 2;
   const knobMat = spec.wheel === 'dish' ? mat('#e8e6df') : dark;
-  const knob = new THREE.Mesh(spec.wheel === 'dish' ? new THREE.SphereGeometry(0.03, 8, 6) : new THREE.IcosahedronGeometry(0.03, 1), knobMat);
-  knob.position.y = stickLen + 0.01;
+  const knob = new THREE.Mesh(spec.wheel === 'dish' ? new THREE.SphereGeometry(0.034, 10, 8) : new THREE.IcosahedronGeometry(0.036, 1), knobMat);
+  knob.position.y = stickLen + 0.012;
   shifter.add(stick, knob);
   cabin.add(shifter);
-  // Leather boot around the lever's base.
-  add(new THREE.ConeGeometry(tall ? 0.07 : 0.055, tall ? 0.1 : 0.05, 8), tall ? accent : dark, 0.02, 0.645, -0.12);
+  // Leather boot around the lever's base, and a surround on the console.
+  add(new THREE.ConeGeometry(tall ? 0.075 : 0.065, tall ? 0.12 : 0.08, 8), tall ? accent : dark, 0.02, 0.66, -0.38);
+  box(0.2, 0.012, 0.2, interiorLight, 0.02, 0.625, -0.38);
 
   // ---- Steering wheel ----
   const wheel = new THREE.Group();
