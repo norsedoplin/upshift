@@ -572,3 +572,45 @@ dl.stats dd {
     max-height: 70%;
   }
 }
+
+/* Controls screen: action, controller binding, keyboard binding. */
+.screen-controls .menu-panel {
+  width: min(560px, 100%);
+}
+.bind-table {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 12px 0 14px;
+}
+.bind-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr;
+  gap: 6px;
+  align-items: center;
+}
+.bind-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.bind-label {
+  font-weight: 600;
+}
+.menu-btn.bind-cell {
+  justify-content: center;
+  padding: 7px 8px;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-btn.bind-cell.focus {
+  transform: none;
+}
+.menu-btn.bind-cell.waiting {
+  border-color: var(--accent);
+  color: var(--accent);
+}

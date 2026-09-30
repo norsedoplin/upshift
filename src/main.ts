@@ -3,6 +3,7 @@ import './style.css';
 import { Car, RPM } from './sim/car';
 import { Chassis } from './sim/chassis';
 import { Input } from './input';
+import { keysLabel, padLabel, type Action } from './bindings';
 import { DualSense } from './dualsense';
 import { Haptics } from './haptics';
 import { EngineAudio } from './audio';
@@ -91,6 +92,9 @@ const menus = new Menus(progress, {
   },
   carChanged: () => applyCar(),
   testRumble: () => haptics.test(input.gamepad()),
+  startCapture: (kind) => input.startCapture(kind),
+  pollCapture: () => input.pollCapture(),
+  cancelCapture: () => input.cancelCapture(),
   dualSense: () => ({
     supported: DualSense.supported(),
     label: dualSenseLabel(),
@@ -139,9 +143,25 @@ function applyCar() {
   exterior.paintMat.color.set(paint);
 }
 
+/** The on-screen control hint, written from the current bindings. */
+function updateHint() {
+  const b = progress.settings.bindings;
+  const p = (a: Action) => padLabel(b.pad[a]);
+  const k = (a: Action) => keysLabel(b.keys[a]);
+  const steerPad = b.pad.steerLeft?.kind === 'axis' && b.pad.steerRight?.kind === 'axis' && b.pad.steerLeft.index === b.pad.steerRight.index ? padLabel(b.pad.steerLeft).replace(/ [←→↑↓]$/, '') : `${p('steerLeft')}/${p('steerRight')}`;
+  hint.innerHTML =
+    `<b>Controller</b> ${p('clutch')} clutch · ${p('gas')} gas · ${p('brake')} brake · ${steerPad} steer · ${p('shiftDown')}/${p('shiftUp')} shift · ${p('ignition')} ignition · ${p('handbrake')} handbrake · ${p('camera')} camera · ${p('pause')} pause` +
+    `<br /><b>Keyboard</b> ${k('clutch')} clutch (hold Shift to release slowly) · ${k('gas')} gas · ${k('brake')} brake · ${k('steerLeft')}/${k('steerRight')} steer · ${k('shiftDown')}/${k('shiftUp')} shift · ${k('ignition')} ignition · ${k('handbrake')} handbrake · ${k('reset')} restart · ${k('camera')} camera · ${k('pause')} pause`;
+}
+
 let graphicsReady = false;
 function applySettings() {
   const st = progress.settings;
+  input.bindings = st.bindings;
+  const clutchPad = st.bindings.pad.clutch;
+  haptics.clutchTrigger = clutchPad?.kind === 'button' ? (clutchPad.index === 6 ? 'left' : clutchPad.index === 7 ? 'right' : null) : null;
+  haptics.clutchFeel = st.clutchFeel;
+  updateHint();
   haptics.strength = st.rumble;
   audio.setVolume(st.volume);
   if (st.graphics !== graphics.quality || !graphicsReady) {
@@ -437,7 +457,7 @@ function updateHud(clutch: number, brake: number, throttle: number, pad: Gamepad
   const frac = Math.min(1, Math.max(0, (s - road.startS) / (road.finishS - road.startS)));
   hud.progress.style.width = `${frac * 100}%`;
 
-  const gp = pad ? '△' : 'I';
+  const gp = pad ? padLabel(progress.settings.bindings.pad.ignition) : keysLabel(progress.settings.bindings.keys.ignition);
   let msg = '';
   if (performance.now() < flash.until) msg = flash.text;
   else if (!car.running && !car.cranking)

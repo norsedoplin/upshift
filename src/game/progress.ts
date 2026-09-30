@@ -1,6 +1,8 @@
 // Player progress and settings kept in this browser: creds, garage and personal bests.
 // Storage can be unavailable (private windows, blocked site data), so every access is guarded.
 
+import { defaultBindings, parseBindings, type Bindings } from '../bindings';
+
 export interface Settings {
   rumble: number; // 0..1
   volume: number; // 0..1
@@ -10,6 +12,8 @@ export interface Settings {
   fov: number; // degrees, horizontal screens; portrait screens add 20
   graphics: GraphicsQuality;
   speedo: SpeedoMode; // on-screen speedo; auto = only when the dash is out of view
+  bindings: Bindings;
+  clutchFeel: boolean; // DualSense adaptive trigger pushes back at the bite point
 }
 
 export type SpeedoMode = 'auto' | 'on' | 'off';
@@ -44,7 +48,7 @@ export interface Progress {
 
 const KEY = 'upshift.progress.v1';
 
-export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high', speedo: 'auto' };
+export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high', speedo: 'auto', bindings: defaultBindings(), clutchFeel: true };
 
 export function defaultProgress(): Progress {
   return {
@@ -55,7 +59,7 @@ export function defaultProgress(): Progress {
     ownedPaints: [],
     car: 'hatch',
     paintByCar: {},
-    settings: { ...DEFAULT_SETTINGS, graphics: defaultGraphics() },
+    settings: { ...DEFAULT_SETTINGS, graphics: defaultGraphics(), bindings: defaultBindings() },
     grants: [],
   };
 }
@@ -106,6 +110,8 @@ export function parseProgress(raw: string | null): Progress {
       fov: Math.round(Math.min(100, Math.max(50, num(st.fov, DEFAULT_SETTINGS.fov))) / 5) * 5,
       graphics: GRAPHICS_QUALITIES.includes(st.graphics) ? st.graphics : p.settings.graphics,
       speedo: SPEEDO_MODES.includes(st.speedo) ? st.speedo : DEFAULT_SETTINGS.speedo,
+      bindings: parseBindings(st.bindings),
+      clutchFeel: typeof st.clutchFeel === 'boolean' ? st.clutchFeel : true,
     };
   } catch {
     // Corrupt data: start fresh rather than crash.

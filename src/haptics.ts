@@ -3,7 +3,7 @@
 // and, for Xbox pads on Windows, "trigger-rumble". Everything here degrades to a no-op.
 
 import type { Car } from './sim/car';
-import { DualSense } from './dualsense';
+import { DualSense, TRIGGER_OFF, triggerSection } from './dualsense';
 
 type Actuator = {
   effects?: string[];
@@ -25,6 +25,9 @@ export class Haptics {
   /** Direct USB/Bluetooth link to a DualSense, used when the browser can't rumble it. */
   readonly dualsense = new DualSense();
   private testUntil = 0;
+  /** Which trigger the clutch is on (from the bindings), so it can push back at the bite point. */
+  clutchTrigger: 'left' | 'right' | null = 'left';
+  clutchFeel = true; // player setting
 
   stall() {
     this.impulse = Math.max(this.impulse, 1);
@@ -70,6 +73,16 @@ export class Haptics {
       if (performance.now() < this.testUntil) return;
       // No pad passed means menus are open: keep the motors still.
       const k = this.enabled && pad ? this.strength : 0;
+      // Adaptive trigger: the clutch trigger stiffens over the stretch where the clutch first grabs.
+      // Pedal travel is 1 - engagement, so the grab starts at 1 - biteStart and firms up towards 1 - biteEnd.
+      let clutch = TRIGGER_OFF;
+      if (pad && this.clutchFeel && this.clutchTrigger && k > 0) {
+        const grab = 1 - car.spec.biteStart;
+        const firm = 1 - car.spec.biteEnd;
+        const start = grab - (grab - firm) * 0.35;
+        clutch = triggerSection(start, grab + 0.03, 0.45 * Math.min(1, 0.4 + 0.6 * k));
+      }
+      this.dualsense.setTriggers(this.clutchTrigger === 'left' ? clutch : TRIGGER_OFF, this.clutchTrigger === 'right' ? clutch : TRIGGER_OFF);
       this.dualsense.rumble(this.strong * k, this.weak * k);
       return;
     }
@@ -116,6 +129,7 @@ export class Haptics {
   }
 
   stop(pad: Gamepad | null) {
+    this.dualsense.setTriggers(TRIGGER_OFF, TRIGGER_OFF);
     this.dualsense.stop();
     const act = (pad as unknown as { vibrationActuator?: Actuator } | null)?.vibrationActuator;
     act?.reset?.().catch(() => {});

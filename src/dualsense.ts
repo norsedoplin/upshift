@@ -50,8 +50,41 @@ export function crc32(bytes: Uint8Array, seed = 0xffffffff) {
   return c >>> 0;
 }
 
+/** An adaptive-trigger effect: 11 bytes, mode first. */
+export type TriggerEffect = Uint8Array;
+
+/** No resistance. */
+export const TRIGGER_OFF: TriggerEffect = new Uint8Array([0x05, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+/**
+ * Resistance over one stretch of the trigger's travel (0 = released, 1 = fully pressed) that
+ * gives way past the end, like pushing through a clutch's bite point. Force is 0..1.
+ */
+export function triggerSection(start: number, end: number, force: number): TriggerEffect {
+  const b = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
+  const e = new Uint8Array(11);
+  e[0] = 0x02; // "simple section" resistance
+  e[1] = b(start);
+  e[2] = Math.max(b(start) + 1, b(end));
+  e[3] = b(force);
+  return e;
+}
+
+export interface Triggers {
+  left?: TriggerEffect;
+  right?: TriggerEffect;
+}
+
 /** Builds the report body (without the report id) for a rumble of 0..1 on each motor. */
-export function rumbleReport(bluetooth: boolean, strong: number, weak: number, seq = 0, v2 = true, usbLength = 47): Uint8Array {
+export function rumbleReport(
+  bluetooth: boolean,
+  strong: number,
+  weak: number,
+  seq = 0,
+  v2 = true,
+  usbLength = 47,
+  triggers: Triggers = {},
+): Uint8Array {
   const toByte = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
   // Common block: valid_flag0, valid_flag1, motor_right (weak), motor_left (strong), ..., valid_flag2 at 38.
   const common = new Uint8Array(47);
@@ -61,6 +94,15 @@ export function rumbleReport(bluetooth: boolean, strong: number, weak: number, s
   common[2] = toByte(weak);
   common[3] = toByte(strong);
   if (v2) common[38] = 0x04;
+  // Adaptive triggers: flag bits 2 (right) and 3 (left); effects at 10 (right) and 21 (left).
+  if (triggers.right) {
+    common[0] |= 0x04;
+    common.set(triggers.right.subarray(0, 11), 10);
+  }
+  if (triggers.left) {
+    common[0] |= 0x08;
+    common.set(triggers.left.subarray(0, 11), 21);
+  }
   if (!bluetooth) {
     // Over USB the body is the common block; Windows rejects a report longer than the descriptor says (47 bytes).
     const data = new Uint8Array(Math.max(47, usbLength));
@@ -94,6 +136,8 @@ export class DualSense {
   private busy = false;
   private pending: [number, number] | null = null;
   private last: [number, number] = [-1, -1];
+  private triggers: Triggers = {};
+  private triggersDirty = false;
   private lastSent = 0;
 
   static supported() {
@@ -166,18 +210,30 @@ export class DualSense {
   private send(strong: number, weak: number) {
     const id = this.bluetooth ? 0x31 : 0x02;
     this.lastSent = performance.now();
-    return this.device!.sendReport(id, rumbleReport(this.bluetooth, strong, weak, this.seq++, this.vibrationV2, this.usbLength));
+    this.triggersDirty = false;
+    return this.device!.sendReport(
+      id,
+      rumbleReport(this.bluetooth, strong, weak, this.seq++, this.vibrationV2, this.usbLength, this.triggers),
+    );
   }
 
   /** Set both motors (0..1). Cheap to call every frame: it only sends when something changed. */
   rumble(strong: number, weak: number) {
     if (!this.connected) return;
     const now = performance.now();
-    const changed = Math.abs(strong - this.last[0]) > 0.02 || Math.abs(weak - this.last[1]) > 0.02;
+    const changed = this.triggersDirty || Math.abs(strong - this.last[0]) > 0.02 || Math.abs(weak - this.last[1]) > 0.02;
     // Resend now and then even when steady, in case a report was dropped.
     if (!changed && now - this.lastSent < 250) return;
     this.pending = [strong, weak];
     void this.flush();
+  }
+
+  /** Set the resistance on each trigger. Only resends when an effect actually changes. */
+  setTriggers(left: TriggerEffect, right: TriggerEffect) {
+    const same = (a?: TriggerEffect, b?: TriggerEffect) => !!a && !!b && a.every((v, i) => v === b[i]);
+    if (same(this.triggers.left, left) && same(this.triggers.right, right)) return;
+    this.triggers = { left, right };
+    this.triggersDirty = true;
   }
 
   stop() {

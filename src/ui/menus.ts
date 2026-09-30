@@ -3,12 +3,23 @@
 
 import { CARS, PAINTS, carById, type CarModel } from '../cars';
 import type { MenuNav } from '../input';
+import {
+  ACTIONS,
+  ACTION_LABELS,
+  assignKey,
+  assignPad,
+  defaultBindings,
+  keysLabel,
+  padLabel,
+  type Action,
+  type PadInput,
+} from '../bindings';
 import type { Progress, Settings } from '../game/progress';
 import { GRAPHICS_QUALITIES, SPEEDO_MODES, saveProgress } from '../game/progress';
 import { chooseCar, choosePaint, ownsCar, ownsPaint, paintFor } from '../game/shop';
 import type { RunStats } from '../game/scoring';
 
-export type Screen = 'title' | 'main' | 'garage' | 'settings' | 'pause' | 'summary';
+export type Screen = 'title' | 'main' | 'garage' | 'settings' | 'controls' | 'pause' | 'summary';
 
 interface Item {
   el: HTMLElement;
@@ -30,6 +41,9 @@ export interface MenuHooks {
   settingsChanged(): void;
   preview(car: CarModel | null, paint: string | null): void; // garage showroom
   testRumble(): Promise<string>;
+  startCapture(kind: 'pad' | 'key'): void;
+  pollCapture(): { pad?: PadInput; key?: string } | 'cancel' | null;
+  cancelCapture(): void;
   dualSense(): { supported: boolean; label: string; connect(): Promise<string> };
 }
 
@@ -50,6 +64,7 @@ export class Menus {
   private lastSummary: { stats: RunStats; earned: number; best: boolean; time: string } | null = null;
   private status = '';
   private rumbleResult = '';
+  private capturing: { action: Action; kind: 'pad' | 'key' } | null = null;
   // Swallow input for one frame after a screen change, so one press can't act twice.
   private settle = false;
 
@@ -82,7 +97,11 @@ export class Menus {
 
   open(screen: Screen | null) {
     if (screen === 'garage' && this.screen && this.screen !== 'garage' && this.screen !== 'settings') this.garageReturn = this.screen;
-    if (screen === 'settings' && this.screen && this.screen !== 'settings') this.settingsReturn = this.screen;
+    if (screen === 'settings' && this.screen && this.screen !== 'settings' && this.screen !== 'controls') this.settingsReturn = this.screen;
+    if (this.capturing) {
+      this.capturing = null;
+      this.hooks.cancelCapture();
+    }
     if (this.screen === 'garage' && screen !== 'garage') this.hooks.preview(null, null);
     this.screen = screen;
     this.status = '';
@@ -102,6 +121,10 @@ export class Menus {
     if (!this.screen) return;
     if (this.settle) {
       this.settle = false;
+      return;
+    }
+    if (this.capturing) {
+      this.pollCapture();
       return;
     }
     if (this.screen === 'title') {
@@ -126,6 +149,10 @@ export class Menus {
         break;
       case 'settings':
         this.open(this.settingsReturn);
+        break;
+      case 'controls':
+        this.open('settings');
+        this.focusOnLabel('Controls');
         break;
       case 'garage':
         this.open(this.garageReturn);
@@ -212,6 +239,9 @@ export class Menus {
         break;
       case 'settings':
         this.renderSettings(panel);
+        break;
+      case 'controls':
+        this.renderControls(panel);
         break;
       case 'pause':
         this.renderPause(panel);
@@ -345,6 +375,7 @@ export class Menus {
         },
       });
       list.append(link);
+      option('Clutch trigger feel', row++, ['On', 'Off'], st.clutchFeel ? 0 : 1, (i) => (st.clutchFeel = i === 0));
     }
     option('Volume', row++, pctLabels, nearest(st.volume), (i) => (st.volume = pct[i]));
     option('Speed units', row++, ['km/h', 'mph'], st.units === 'kmh' ? 0 : 1, (i) => (st.units = i === 0 ? 'kmh' : 'mph'));
@@ -355,6 +386,7 @@ export class Menus {
     option('Graphics', row++, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
     option('On-screen speedo', row++, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
     option('Control hints', row++, ['On', 'Off'], st.hints ? 0 : 1, (i) => (st.hints = i === 0));
+    list.append(this.button('Controls', row++, () => this.open('controls')));
     list.append(this.button('Back', row++, () => this.back()));
     panel.append(list, this.controlsHint());
   }
@@ -448,6 +480,71 @@ export class Menus {
     const back = h('div', 'menu-list');
     back.append(this.button('Back', paintRow + 1, () => this.back()));
     panel.append(back, this.controlsHint());
+  }
+
+  private renderControls(panel: HTMLElement) {
+    const b = this.progress.settings.bindings;
+    panel.append(h('h2', undefined, 'Controls'));
+    const table = h('div', 'bind-table');
+    const head = h('div', 'bind-row bind-head');
+    head.append(h('span', undefined, ''), h('span', undefined, 'Controller'), h('span', undefined, 'Keyboard'));
+    table.append(head);
+    ACTIONS.forEach((a, row) => {
+      const r = h('div', 'bind-row');
+      const cell = (kind: 'pad' | 'key', col: number) => {
+        const waiting = this.capturing?.action === a && this.capturing.kind === kind;
+        const text = waiting ? (kind === 'pad' ? 'Press or move…' : 'Press a key…') : kind === 'pad' ? padLabel(b.pad[a]) : keysLabel(b.keys[a]);
+        const el = h('div', `menu-btn bind-cell${waiting ? ' waiting' : ''}`, text);
+        this.add(el, row, col, { confirm: () => this.beginCapture(a, kind) });
+        return el;
+      };
+      r.append(h('span', 'bind-label', ACTION_LABELS[a]), cell('pad', 0), cell('key', 1));
+      table.append(r);
+    });
+    const list = h('div', 'menu-list');
+    list.append(
+      this.button('Reset to defaults', ACTIONS.length, () => {
+        this.progress.settings.bindings = defaultBindings();
+        this.bindingsChanged();
+      }),
+      this.button('Back', ACTIONS.length + 1, () => this.back()),
+    );
+    const note = h('p', 'menu-hint', this.status || 'Select a box, then press the button, move the stick or press the key. Esc cancels.');
+    panel.append(table, list, note);
+  }
+
+  private beginCapture(action: Action, kind: 'pad' | 'key') {
+    this.capturing = { action, kind };
+    this.status = '';
+    this.hooks.startCapture(kind);
+    this.rerenderKeepingFocus();
+  }
+
+  private pollCapture() {
+    const cap = this.capturing;
+    if (!cap) return;
+    const got = this.hooks.pollCapture();
+    if (!got) return;
+    this.capturing = null;
+    // A bound controller press shouldn't also act on the menu (captured keys never reach it).
+    if (cap.kind === 'pad') this.settle = true;
+    if (got !== 'cancel') {
+      const b = this.progress.settings.bindings;
+      const cleared = got.pad ? assignPad(b, cap.action, got.pad) : got.key ? assignKey(b, cap.action, got.key) : [];
+      this.status = cleared.length ? `Moved from ${cleared.map((a) => ACTION_LABELS[a]).join(', ')}, which is now unbound.` : '';
+    }
+    this.bindingsChanged();
+  }
+
+  private bindingsChanged() {
+    saveProgress(this.progress);
+    this.hooks.settingsChanged();
+    this.rerenderKeepingFocus();
+  }
+
+  private focusOnLabel(label: string) {
+    const i = this.items.findIndex((it) => it.el.textContent === label);
+    if (i >= 0) this.setFocus(i);
   }
 
   private rerenderKeepingFocus() {
