@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultProgress, parseProgress } from './progress';
+import { applyGrants, defaultProgress, parseProgress } from './progress';
 import { chooseCar, choosePaint, paintFor } from './shop';
 
 describe('progress', () => {
@@ -9,6 +9,15 @@ describe('progress', () => {
     expect(p.ownedCars).toEqual(['hatch']);
     expect(p.car).toBe('hatch');
     expect(p.settings.rumble).toBe(1);
+  });
+
+  it('gives the playtest creds once, even to old saves', () => {
+    const p = parseProgress(JSON.stringify({ creds: 420, bestScore: 900, runs: 3 }));
+    expect(applyGrants(p)).toBe(true);
+    expect(p.creds).toBe(6420);
+    const again = parseProgress(JSON.stringify(p));
+    expect(applyGrants(again)).toBe(false);
+    expect(again.creds).toBe(6420);
   });
 
   it('survives garbage', () => {

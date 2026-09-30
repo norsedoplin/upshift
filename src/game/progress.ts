@@ -17,6 +17,7 @@ export interface Progress {
   car: string;
   paintByCar: Record<string, string>;
   settings: Settings;
+  grants: string[]; // one-time gifts already given, so each lands only once
 }
 
 const KEY = 'upshift.progress.v1';
@@ -33,7 +34,23 @@ export function defaultProgress(): Progress {
     car: 'hatch',
     paintByCar: {},
     settings: { ...DEFAULT_SETTINGS },
+    grants: [],
   };
+}
+
+/** Creds handed out once per save. The playtest grant lets testers try every car. */
+export const GRANTS: { id: string; creds: number }[] = [{ id: 'playtest-1', creds: 6000 }];
+
+/** Give any grants this save hasn't had yet. Returns true if something was added. */
+export function applyGrants(p: Progress) {
+  let changed = false;
+  for (const g of GRANTS) {
+    if (p.grants.includes(g.id)) continue;
+    p.creds += g.creds;
+    p.grants.push(g.id);
+    changed = true;
+  }
+  return changed;
 }
 
 /** Merge whatever was stored (possibly an older, smaller shape) over the defaults. */
@@ -49,6 +66,7 @@ export function parseProgress(raw: string | null): Progress {
     p.runs = Math.max(0, num(s.runs, 0));
     p.ownedCars = Array.from(new Set(['hatch', ...strs(s.ownedCars)]));
     p.ownedPaints = strs(s.ownedPaints);
+    p.grants = strs(s.grants);
     if (typeof s.car === 'string' && p.ownedCars.includes(s.car)) p.car = s.car;
     if (s.paintByCar && typeof s.paintByCar === 'object') {
       for (const [k, v] of Object.entries(s.paintByCar)) if (typeof v === 'string') p.paintByCar[k] = v;
@@ -68,9 +86,13 @@ export function parseProgress(raw: string | null): Progress {
 
 export function loadProgress(): Progress {
   try {
-    return parseProgress(localStorage.getItem(KEY));
+    const p = parseProgress(localStorage.getItem(KEY));
+    if (applyGrants(p)) saveProgress(p);
+    return p;
   } catch {
-    return defaultProgress();
+    const p = defaultProgress();
+    applyGrants(p);
+    return p;
   }
 }
 

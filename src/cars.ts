@@ -11,6 +11,10 @@ export interface BodyShape {
   cabinHeight: number;
   cabinOffset: number; // + towards the rear
   wheelRadius: number;
+  style: 'hatch' | 'coupe' | 'sedan';
+  spoiler?: 'roof' | 'ducktail' | 'wing';
+  flares?: boolean;
+  exhausts: 1 | 2;
 }
 
 export interface CarModel {
@@ -52,7 +56,7 @@ const HATCH: CarModel = {
   price: 0,
   spec: HATCHBACK,
   chassis: HATCHBACK_CHASSIS,
-  body: { length: 3.9, width: 1.7, height: 0.72, cabinLength: 2.1, cabinHeight: 0.62, cabinOffset: 0.45, wheelRadius: 0.3 },
+  body: { length: 3.9, width: 1.7, height: 0.72, cabinLength: 2.1, cabinHeight: 0.62, cabinOffset: 0.45, wheelRadius: 0.3, style: 'hatch', spoiler: 'roof', exhausts: 1 },
   defaultPaint: 'coral',
   cylinders: 4,
   stats: { power: 0.45, weight: 0.55, grip: 0.55, drive: 'FWD' },
@@ -91,7 +95,7 @@ const KITSUNE: CarModel = {
     rearGrip: 1.06,
     drivenAxle: 'rear',
   },
-  body: { length: 4.2, width: 1.63, height: 0.66, cabinLength: 1.9, cabinHeight: 0.56, cabinOffset: 0.2, wheelRadius: 0.29 },
+  body: { length: 4.2, width: 1.63, height: 0.66, cabinLength: 1.9, cabinHeight: 0.56, cabinOffset: 0.2, wheelRadius: 0.29, style: 'coupe', spoiler: 'ducktail', exhausts: 1 },
   defaultPaint: 'snow',
   cylinders: 4,
   stats: { power: 0.55, weight: 0.3, grip: 0.6, drive: 'RWD' },
@@ -133,7 +137,7 @@ const RONIN: CarModel = {
     rearGrip: 1.08,
     drivenAxle: 'rear',
   },
-  body: { length: 4.5, width: 1.8, height: 0.68, cabinLength: 2.0, cabinHeight: 0.58, cabinOffset: 0.3, wheelRadius: 0.33 },
+  body: { length: 4.5, width: 1.8, height: 0.68, cabinLength: 2.0, cabinHeight: 0.58, cabinOffset: 0.3, wheelRadius: 0.33, style: 'sedan', spoiler: 'wing', flares: true, exhausts: 2 },
   defaultPaint: 'midnight',
   cylinders: 6,
   stats: { power: 0.9, weight: 0.7, grip: 0.75, drive: 'RWD' },
