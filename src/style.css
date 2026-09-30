@@ -82,6 +82,15 @@ body {
 .bar.bite {
   background: var(--accent);
 }
+.pedal.boost {
+  margin-left: 4px;
+}
+.pedal.boost .bar {
+  background: linear-gradient(0deg, #4de1ff, #ff5b3d);
+}
+.pedal.hidden {
+  display: none;
+}
 
 #speedo {
   position: fixed;
@@ -492,14 +501,14 @@ body.in-menu #speedo {
   pointer-events: none;
   opacity: 0;
   z-index: 2;
-  box-shadow: inset 0 0 120px 30px var(--flash, #c8f04a);
+  box-shadow: inset 0 0 90px 10px var(--flash, #c8f04a);
 }
 #edge-flash.go {
   animation: edge-flash 0.7s ease-out;
 }
 @keyframes edge-flash {
   0% {
-    opacity: 0.7;
+    opacity: 0.5;
   }
   100% {
     opacity: 0;
@@ -561,7 +570,8 @@ body.in-menu #pad-status {
 #menus.screen-title {
   cursor: pointer;
 }
-#menus.screen-garage {
+#menus.screen-garage,
+#menus.screen-tune {
   background: linear-gradient(90deg, rgba(22, 23, 27, 0.92) 0%, rgba(22, 23, 27, 0.4) 45%, transparent 70%);
   backdrop-filter: none;
 }
@@ -959,6 +969,7 @@ dl.stats dd {
 }
 #menus.screen-main,
 #menus.screen-garage,
+#menus.screen-tune,
 #menus.screen-settings,
 #menus.screen-controls,
 #menus.screen-help,
@@ -1511,4 +1522,65 @@ body.retro-console .menu-panel h2 {
 body.retro-vhs #score {
   font-size: 56px;
   font-style: normal;
+}
+
+/* ---------- Tuning ---------- */
+.screen-tune .menu-panel {
+  width: min(500px, 100%);
+}
+.tune-figures {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+.tune-fig {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.tune-fig span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tune-fig b {
+  font-family: var(--display);
+  white-space: nowrap;
+  font-size: 19px;
+  line-height: 1.1;
+}
+.tune-fig i {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+}
+.tune-fig i.up {
+  color: var(--lime);
+}
+.tune-fig i.down {
+  color: #ff7a6b;
+}
+.tune-label {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.tune-label small {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.tune-label small.fitted {
+  color: var(--lime);
+}
+.tune-label small.price {
+  color: #ffb13d;
+}
+.status.warn {
+  color: #ff9a6b;
 }

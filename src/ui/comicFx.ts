@@ -74,7 +74,7 @@ export class ComicFx {
     if (wings && speed > 0.25) {
       this.wingTimer -= dt;
       if (this.wingTimer <= 0) {
-        this.wingTimer = 0.05 / speed;
+        this.wingTimer = 0.09 / speed;
         for (const side of [-1, 1]) {
           this.add({
             kind: 'wing',
@@ -179,7 +179,7 @@ export class ComicFx {
       ctx.moveTo(0, 0);
       ctx.quadraticCurveTo(b.side * len * 0.6, -bend * b.side * 0.6 - len * 0.1, b.side * len, len * 0.25);
     };
-    const width = (1 - k) * 9 + 2;
+    const width = (1 - k) * 6 + 1.5;
     path();
     ctx.strokeStyle = INK;
     ctx.lineWidth = width + 5;
