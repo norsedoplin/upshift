@@ -11,6 +11,10 @@ export class Showroom {
   private holder = new THREE.Group();
   private paintMat: THREE.MeshStandardMaterial | null = null;
   private angle = 0.6;
+  // Player camera: pitch above the floor and distance, plus how long since they last touched it.
+  private pitch = 0.23;
+  private dist = 10.8;
+  private idle = 99;
 
   constructor() {
     this.scene.background = new THREE.Color('#1d1f24');
@@ -58,6 +62,25 @@ export class Showroom {
     this.paintMat?.color.set(paint);
   }
 
+  /** Turn the car (dx), tilt the camera (dy) and zoom (dz, positive = closer). */
+  orbit(dx: number, dy: number, dz = 0) {
+    if (dx === 0 && dy === 0 && dz === 0) return;
+    this.angle += dx;
+    this.pitch = Math.min(1.2, Math.max(0.05, this.pitch + dy));
+    this.dist = Math.min(14, Math.max(7, this.dist * Math.exp(-dz)));
+    this.idle = 0;
+  }
+
+  /** Right stick turns and tilts, L2/R2 zoom. Call once a frame while the garage is open. */
+  control(pad: Gamepad | null, dt: number) {
+    if (!pad) return;
+    const dz = (v: number) => (Math.abs(v) < 0.15 ? 0 : v);
+    const rx = dz(pad.axes[2] ?? 0);
+    const ry = dz(pad.axes[3] ?? 0);
+    const zoom = (pad.buttons[7]?.value ?? 0) - (pad.buttons[6]?.value ?? 0);
+    this.orbit(rx * 2.2 * dt, -ry * 1.2 * dt, dz(zoom) * 1.2 * dt);
+  }
+
   render(renderer: THREE.WebGLRenderer, dt: number, aspect: number) {
     // Soft studio reflections for the paint, baked once.
     if (!this.scene.environment) {
@@ -65,14 +88,19 @@ export class Showroom {
       this.scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
       pm.dispose();
     }
-    this.angle += dt * 0.35;
+    // The turntable spins on its own until you take the camera, and again after a few idle seconds.
+    this.idle += dt;
+    if (this.idle > 4) this.angle += dt * 0.35 * Math.min(1, (this.idle - 4) / 1.5);
     this.holder.rotation.y = this.angle;
     // On wide screens the menu sits on the left, so aim left of the car to push it right.
     const wide = aspect > 1.1;
     this.camera.aspect = aspect;
     this.camera.fov = wide ? 30 : 42;
-    this.camera.position.set(0, 2.5, 10.5);
-    this.camera.lookAt(wide ? -2 : 0, wide ? 0.6 : -2.6, 0);
+    // Zooming in brings the car to the middle of the free space; the framing offset shrinks with distance.
+    const f = this.dist / 10.8;
+    const target = new THREE.Vector3(wide ? -2 * f : 0, wide ? 0.6 : -2.6 * f + 0.6 * (1 - f), 0);
+    this.camera.position.set(0, Math.sin(this.pitch) * this.dist, Math.cos(this.pitch) * this.dist);
+    this.camera.lookAt(target);
     this.camera.updateProjectionMatrix();
     renderer.render(this.scene, this.camera);
   }

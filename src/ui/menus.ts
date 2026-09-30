@@ -19,6 +19,8 @@ import { GRAPHICS_QUALITIES, SPEEDO_MODES, saveProgress } from '../game/progress
 import { chooseCar, choosePaint, ownsCar, ownsPaint, paintFor } from '../game/shop';
 import type { RunStats } from '../game/scoring';
 
+const SETTINGS_TABS = ['Controller', 'View', 'Game'] as const;
+
 export type Screen = 'title' | 'main' | 'garage' | 'settings' | 'controls' | 'pause' | 'summary';
 
 interface Item {
@@ -64,6 +66,7 @@ export class Menus {
   private lastSummary: { stats: RunStats; earned: number; best: boolean; time: string } | null = null;
   private status = '';
   private rumbleResult = '';
+  private settingsTab = 0;
   private capturing: { action: Action; kind: 'pad' | 'key' } | null = null;
   // Swallow input for one frame after a screen change, so one press can't act twice.
   private settle = false;
@@ -140,6 +143,15 @@ export class Menus {
     if (nav.right) cur?.right ? cur.right() : this.move(0, 1);
     if (nav.confirm) this.items[this.focusIndex]?.confirm?.();
     if (nav.back || (nav.pause && this.screen === 'pause')) this.back();
+    if ((nav.tabPrev || nav.tabNext) && this.screen === 'settings') this.switchTab(nav.tabNext ? 1 : -1);
+  }
+
+  private switchTab(d: number) {
+    this.settingsTab = (this.settingsTab + d + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+    this.render();
+    // Land on the first setting of the new section rather than the tab strip.
+    const first = this.items.findIndex((it) => it.row === 1);
+    if (first >= 0) this.setFocus(first);
   }
 
   back() {
@@ -151,8 +163,9 @@ export class Menus {
         this.open(this.settingsReturn);
         break;
       case 'controls':
+        this.settingsTab = 0;
         this.open('settings');
-        this.focusOnLabel('Controls');
+        this.focusOnLabel('Controls›');
         break;
       case 'garage':
         this.open(this.garageReturn);
@@ -347,48 +360,65 @@ export class Menus {
     const pct = [0, 0.25, 0.5, 0.75, 1];
     const pctLabels = ['Off', '25%', '50%', '75%', '100%'];
     const nearest = (v: number) => pct.reduce((b, x, i) => (Math.abs(x - v) < Math.abs(pct[b] - v) ? i : b), 0);
-    option('Controller rumble', 0, pctLabels, nearest(st.rumble), (i) => (st.rumble = pct[i]));
-    const test = h('div', 'menu-btn setting');
-    const result = h('span', 'value', this.rumbleResult || 'Press ✕');
-    test.append(h('span', undefined, 'Test rumble'), result);
-    this.add(test, 1, 0, {
-      confirm: () => {
-        result.textContent = '…';
-        void this.hooks.testRumble().then((msg) => {
-          this.rumbleResult = msg;
-          result.textContent = msg;
-        });
-      },
+
+    // Section tabs on row 0; L1/R1 (or Q/E) flip between them from anywhere on the screen.
+    const tabs = h('div', 'tab-strip');
+    SETTINGS_TABS.forEach((name, i) => {
+      const t = h('div', `menu-btn tab${i === this.settingsTab ? ' active' : ''}`, name);
+      this.add(t, 0, i, { confirm: () => this.switchTab(i - this.settingsTab) });
+      tabs.append(t);
     });
-    list.append(test);
-    let row = 2;
-    const ds = this.hooks.dualSense();
-    if (ds.supported) {
-      // Chrome often can't rumble a DualSense through the Gamepad API, so offer a direct link.
-      const link = h('div', 'menu-btn setting');
-      const state = h('span', 'value', ds.label);
-      link.append(h('span', undefined, 'DualSense rumble'), state);
-      this.add(link, row++, 0, {
+    panel.append(tabs);
+
+    let row = 1;
+    const tab = SETTINGS_TABS[this.settingsTab];
+    if (tab === 'Controller') {
+      option('Controller rumble', row++, pctLabels, nearest(st.rumble), (i) => (st.rumble = pct[i]));
+      const test = h('div', 'menu-btn setting');
+      const result = h('span', 'value', this.rumbleResult || 'Press ✕');
+      test.append(h('span', undefined, 'Test rumble'), result);
+      this.add(test, row++, 0, {
         confirm: () => {
-          state.textContent = '…';
-          void ds.connect().then((msg) => (state.textContent = msg));
+          result.textContent = '…';
+          void this.hooks.testRumble().then((msg) => {
+            this.rumbleResult = msg;
+            result.textContent = msg;
+          });
         },
       });
-      list.append(link);
-      option('Clutch trigger feel', row++, ['On', 'Off'], st.clutchFeel ? 0 : 1, (i) => (st.clutchFeel = i === 0));
+      list.append(test);
+      const ds = this.hooks.dualSense();
+      if (ds.supported) {
+        // Chrome often can't rumble a DualSense through the Gamepad API, so offer a direct link.
+        const link = h('div', 'menu-btn setting');
+        const state = h('span', 'value', ds.label);
+        link.append(h('span', undefined, 'DualSense rumble'), state);
+        this.add(link, row++, 0, {
+          confirm: () => {
+            state.textContent = '…';
+            void ds.connect().then((msg) => (state.textContent = msg));
+          },
+        });
+        list.append(link);
+        option('Clutch trigger feel', row++, ['On', 'Off'], st.clutchFeel ? 0 : 1, (i) => (st.clutchFeel = i === 0));
+      }
+      const controls = this.button('Controls', row++, () => this.open('controls'), 'menu-btn setting');
+      controls.append(h('span', 'value', '›'));
+      list.append(controls);
+    } else if (tab === 'View') {
+      const views: Settings['camera'][] = ['cockpit', 'hood', 'chase'];
+      option('Camera', row++, ['Cockpit', 'Hood', 'Chase'], views.indexOf(st.camera), (i) => (st.camera = views[i]));
+      const fovs = Array.from({ length: 11 }, (_, i) => 50 + i * 5);
+      option('Field of view', row++, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
+      option('On-screen speedo', row++, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
+      option('Graphics', row++, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
+    } else {
+      option('Volume', row++, pctLabels, nearest(st.volume), (i) => (st.volume = pct[i]));
+      option('Speed units', row++, ['km/h', 'mph'], st.units === 'kmh' ? 0 : 1, (i) => (st.units = i === 0 ? 'kmh' : 'mph'));
+      option('Control hints', row++, ['On', 'Off'], st.hints ? 0 : 1, (i) => (st.hints = i === 0));
     }
-    option('Volume', row++, pctLabels, nearest(st.volume), (i) => (st.volume = pct[i]));
-    option('Speed units', row++, ['km/h', 'mph'], st.units === 'kmh' ? 0 : 1, (i) => (st.units = i === 0 ? 'kmh' : 'mph'));
-    const views: Settings['camera'][] = ['cockpit', 'hood', 'chase'];
-    option('Camera', row++, ['Cockpit', 'Hood', 'Chase'], views.indexOf(st.camera), (i) => (st.camera = views[i]));
-    const fovs = Array.from({ length: 11 }, (_, i) => 50 + i * 5);
-    option('Field of view', row++, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
-    option('Graphics', row++, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
-    option('On-screen speedo', row++, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
-    option('Control hints', row++, ['On', 'Off'], st.hints ? 0 : 1, (i) => (st.hints = i === 0));
-    list.append(this.button('Controls', row++, () => this.open('controls')));
     list.append(this.button('Back', row++, () => this.back()));
-    panel.append(list, this.controlsHint());
+    panel.append(list, h('div', 'menu-hint', 'L1 / R1 or Q / E switch section · ✕ / Enter select · ○ / Esc back'));
   }
 
   private renderGarage(panel: HTMLElement) {
@@ -479,7 +509,7 @@ export class Menus {
     if (this.status) panel.append(h('div', 'status', this.status));
     const back = h('div', 'menu-list');
     back.append(this.button('Back', paintRow + 1, () => this.back()));
-    panel.append(back, this.controlsHint());
+    panel.append(back, this.controlsHint(), h('div', 'menu-hint', 'Right stick or drag to look around · L2 / R2 or scroll to zoom'));
   }
 
   private renderControls(panel: HTMLElement) {

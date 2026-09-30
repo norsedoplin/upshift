@@ -25,6 +25,7 @@ export class Haptics {
   /** Direct USB/Bluetooth link to a DualSense, used when the browser can't rumble it. */
   readonly dualsense = new DualSense();
   private testUntil = 0;
+  private lastEngage = 1;
   /** Which trigger the clutch is on (from the bindings), so it can push back at the bite point. */
   clutchTrigger: 'left' | 'right' | null = 'left';
   clutchFeel = true; // player setting
@@ -38,6 +39,9 @@ export class Haptics {
   jolt(strength: number) {
     this.impulse = Math.max(this.impulse, strength);
   }
+  thud(strength: number) {
+    this.impulse = Math.max(this.impulse, Math.min(0.6, strength));
+  }
   lock(slip: number) {
     // A clutch that snaps shut with a big speed difference is a thump.
     this.impulse = Math.max(this.impulse, Math.min(0.9, slip / 60));
@@ -47,6 +51,14 @@ export class Haptics {
     this.t += dt;
     this.impulse *= Math.exp(-dt / 0.12);
     this.buzz *= Math.exp(-dt / 0.08);
+
+    // A soft thud as the clutch comes fully home, bigger for a quick release in gear.
+    const engage = car.spec.clutchMaxTorque > 0 ? car.clutchCapacity / car.spec.clutchMaxTorque : 1;
+    if (this.lastEngage < 0.97 && engage >= 0.97 && dt > 0) {
+      const rate = Math.min(1, (engage - this.lastEngage) / dt / 6); // full release in ~1/6 s = 1
+      this.thud(0.18 + 0.3 * rate + (car.gear !== 0 ? 0.08 : 0));
+    }
+    this.lastEngage = engage;
 
     // Friction power in the clutch: highest right at the bite point while slipping.
     const slipPower = Math.abs(car.clutchTorque * (car.engineOmega - car.outputOmega));
@@ -80,7 +92,8 @@ export class Haptics {
         const grab = 1 - car.spec.biteStart;
         const firm = 1 - car.spec.biteEnd;
         const start = grab - (grab - firm) * 0.35;
-        clutch = triggerSection(start, grab + 0.03, 0.45 * Math.min(1, 0.4 + 0.6 * k));
+        // Kept light: enough to find the bite, not a wall.
+        clutch = triggerSection(start, grab + 0.03, 0.2 * Math.min(1, 0.4 + 0.6 * k));
       }
       this.dualsense.setTriggers(this.clutchTrigger === 'left' ? clutch : TRIGGER_OFF, this.clutchTrigger === 'right' ? clutch : TRIGGER_OFF);
       this.dualsense.rumble(this.strong * k, this.weak * k);

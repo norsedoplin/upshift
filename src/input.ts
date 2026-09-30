@@ -29,6 +29,8 @@ export interface MenuNav {
   confirm: boolean;
   back: boolean;
   pause: boolean;
+  tabPrev: boolean; // L1 / Q: previous section
+  tabNext: boolean; // R1 / E: next section
 }
 
 const B = {
@@ -280,6 +282,8 @@ export class Input {
       confirm: edgeBtn(B.cross) || k('Enter') || k('Space'),
       back: edgeBtn(B.circle) || k('Escape') || k('Backspace'),
       pause: edgeBtn(B.options),
+      tabPrev: edgeBtn(B.l1) || k('KeyQ'),
+      tabNext: edgeBtn(B.r1) || k('KeyE'),
     };
     this.navPrev = pad ? pad.buttons.map((b) => b.pressed) : [];
     return out;
