@@ -1,14 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { MAPS, mapById, mapStats, roadFor } from './maps';
+import { MAPS, cityForMap, mapById, mapStats, roadFor } from './maps';
 
 describe('maps', () => {
   for (const m of MAPS) {
+    if (!m.options) {
+      it(`builds the town ${m.name}`, () => {
+        const city = cityForMap(m.id)!;
+        expect(city.isOpen(city.spawn.x, city.spawn.z, 1.5)).toBe(true);
+      });
+      continue;
+    }
+    const options = m.options;
     it(`builds ${m.name}`, () => {
       const road = roadFor(m.id);
       const st = mapStats(road);
-      expect(st.km).toBeGreaterThan(((m.options.length ?? 4200) - 300) / 1000);
+      expect(st.km).toBeGreaterThan(((options.length ?? 4200) - 300) / 1000);
       expect(road.lots.length).toBeGreaterThan(0);
-      if (m.options.direction === 'up') expect(st.rise).toBeGreaterThan(50);
+      if (options.direction === 'up') expect(st.rise).toBeGreaterThan(50);
       else expect(st.rise).toBeLessThan(-50);
     });
   }

@@ -10,11 +10,13 @@ import { EngineAudio } from './audio';
 import { buildCockpit, shifterPose } from './cockpit';
 import { drawCluster, drawSpeedo, gearLabel } from './gauges';
 import { roadPoint } from './track/touge';
-import { MAPS, roadFor } from './track/maps';
+import { MAPS, cityForMap, roadFor } from './track/maps';
+import { buildCityScenery } from './track/cityScene';
+import { Minimap } from './ui/minimap';
 import { buildScenery, SUN_DIR, updateTreeDetail } from './track/scenery';
 import { DayCycle } from './track/daylight';
 import { Graphics, bakeEnvironment } from './graphics';
-import { CAR_HALF_WIDTH, collideWithEdges } from './track/collide';
+import { CAR_HALF_WIDTH, collideWithCity, collideWithEdges } from './track/collide';
 import { ComicFx } from './ui/comicFx';
 import { Scorer, cashoutFor, credsForRun, tierFor, ScoreEvent } from './game/scoring';
 import { CAMERA_VIEWS, loadProgress, saveProgress } from './game/progress';
@@ -33,8 +35,14 @@ document.getElementById('app')!.appendChild(renderer.domElement);
 
 const progress = loadProgress();
 const scene = new THREE.Scene();
+// A touge map has a road; a free-roam map is a town instead (and the road goes unused).
+const city = cityForMap(progress.settings.map);
 const road = roadFor(progress.settings.map);
-const scenery = buildScenery(scene, road);
+const cityScenery = city ? buildCityScenery(scene, city) : null;
+const scenery = cityScenery ?? buildScenery(scene, road);
+const minimap = city ? new Minimap(document.getElementById('minimap') as HTMLCanvasElement, city) : null;
+/** In town: how close the car last came to hitting something, for close calls. */
+let cityGap = Infinity;
 const graphics = new Graphics(renderer, scene, scenery.sun, SUN_DIR);
 const day = new DayCycle(scenery.day);
 let envTarget = bakeEnvironment(renderer, scenery.envScene);
@@ -338,6 +346,16 @@ function cycleCamera() {
 
 function resetRun() {
   car.reset();
+  if (city) {
+    // Free roam: no start line, the run (and the scoring) goes from the moment you arrive.
+    chassis.place(city.spawn.x, city.spawn.z, city.spawn.yaw);
+    scorer.reset();
+    chaseCam.ready = false;
+    run = 'running';
+    runTime = 0;
+    toasts.innerHTML = '';
+    return;
+  }
   // Start parked up in the lot beside the start line, pointing down the road.
   const lot = road.lots[0];
   const p = roadPoint(road, lot.s0 + 16, lot.side * (road.wallOffset + 3.4));
@@ -379,6 +397,11 @@ function showFlash(text: string, seconds = 1.6) {
 }
 
 function collide() {
+  if (city) {
+    const c = collideWithCity(city, chassis, car);
+    cityGap = Math.min(cityGap, c.gap);
+    return c;
+  }
   const r = collideWithEdges(road, chassis, car, roadIndex);
   roadIndex = r.loc.index;
   roadS = r.loc.s;
@@ -457,7 +480,7 @@ function frame(now: number) {
   const here = road.sampleAt(roadS);
   const ahead = road.sampleAt(roadS + 2);
   const behind = road.sampleAt(roadS - 2);
-  const roadGrade = (ahead.h - behind.h) / 4;
+  const roadGrade = city ? 0 : (ahead.h - behind.h) / 4;
   grade = roadGrade * Math.cos(chassis.yaw - here.yaw);
   const slope = grade / Math.sqrt(1 + grade * grade);
 
@@ -502,7 +525,7 @@ function frame(now: number) {
 
   // Run flow: the clock starts at the start line and stops at the finish.
   const s = roadS;
-  if (run === 'idle' && s >= road.startS) {
+  if (run === 'idle' && !city && s >= road.startS) {
     run = 'running';
     runTime = 0;
     scorer.reset();
@@ -510,23 +533,30 @@ function frame(now: number) {
   if (run === 'running') {
     runTime += dt;
     scorer.update(dt, car, { throttle: c.throttle, brake: c.brake, clutch: c.clutch }, events);
-    const here = road.locate(chassis.x, chassis.z, roadIndex);
-    const side = Math.sign(here.offset) || 1;
-    scorer.track(dt, {
-      kappa: road.sampleAt(s).kappa,
-      edgeGap: road.wallOffset + road.lotDepth(here.s, side) - CAR_HALF_WIDTH - Math.abs(here.offset),
-      speed: Math.abs(car.speed),
-      latAccel: chassis.latAccel,
-    });
+    if (city) {
+      // In town the line through a corner is the car's own path.
+      const v = Math.abs(car.speed);
+      scorer.track(dt, { kappa: v > 3 ? chassis.yawRate / v : 0, edgeGap: cityGap, speed: v, latAccel: chassis.latAccel });
+      cityGap = Infinity;
+    } else {
+      const here = road.locate(chassis.x, chassis.z, roadIndex);
+      const side = Math.sign(here.offset) || 1;
+      scorer.track(dt, {
+        kappa: road.sampleAt(s).kappa,
+        edgeGap: road.wallOffset + road.lotDepth(here.s, side) - CAR_HALF_WIDTH - Math.abs(here.offset),
+        speed: Math.abs(car.speed),
+        latAccel: chassis.latAccel,
+      });
+    }
     for (const e of scorer.drain()) {
       showToast(e);
       react(e);
     }
-    if (s >= road.finishS) finishRun();
+    if (!city && s >= road.finishS) finishRun();
   }
 
   // Place the car and camera.
-  const loc = road.sampleAt(s);
+  const loc = city ? { h: 0 } : road.sampleAt(s);
   const ground = loc.h + 0.15;
   pitch += (Math.atan(grade) - pitch) * Math.min(1, dt * 8);
   const root = cockpit.root;
@@ -595,6 +625,8 @@ function frame(now: number) {
   shadowFocus.set(chassis.x - Math.sin(chassis.yaw) * 14, loc.h, chassis.z - Math.cos(chassis.yaw) * 14);
   graphics.follow(shadowFocus);
   updateTreeDetail(scenery.trees, shadowFocus);
+  cityScenery?.update(time);
+  minimap?.draw(chassis.x, chassis.z, chassis.yaw);
   const lvl = progress.settings.fxLevel;
   graphics.setMotion(Math.min(1, speed01 + pull * 0.3) * lvl, punch * lvl);
   graphics.render(camera);
@@ -713,7 +745,7 @@ function updateChaseCamera(dt: number, groundY: number) {
   // At speed the camera drops back and down a little, so the road rushes by.
   const st = progress.settings;
   const want = target.clone().addScaledVector(back, st.chaseDist + speed01 * 1.1);
-  want.y = Math.max(groundY + st.chaseHeight - speed01 * 0.3, road.sampleAt(Math.max(0, roadS - 6)).h + 1.6);
+  want.y = Math.max(groundY + st.chaseHeight - speed01 * 0.3, (city ? 0 : road.sampleAt(Math.max(0, roadS - 6)).h) + 1.6);
   if (chaseCam.ready) chaseCam.pos.lerp(want, Math.min(1, dt * 8));
   else chaseCam.pos.copy(want);
   chaseCam.ready = true;
@@ -788,7 +820,7 @@ function recordMapBest(score: number) {
 // Lay out the other roads while you sit in the menus, so the map picker opens instantly
 // (never mid-run, where it would cost a dropped frame).
 {
-  const rest = MAPS.map((m) => m.id).filter((id) => id !== progress.settings.map);
+  const rest = MAPS.filter((m) => m.options).map((m) => m.id).filter((id) => id !== progress.settings.map);
   const next = () => {
     if (!rest.length) return;
     if (menus.isOpen) roadFor(rest.shift()!);
@@ -848,8 +880,8 @@ function updateHud(clutch: number, brake: number, throttle: number, pad: Gamepad
   if (tier && tier !== lastTier && run === 'running' && tierRank(tier) > tierRank(lastTier)) showTier(tier);
   lastTier = tier;
   hud.creds.textContent = `◆ ${progress.creds.toLocaleString()}`;
-  hud.timer.textContent = run === 'idle' ? 'Drive to the start line' : formatTime(runTime);
-  const frac = Math.min(1, Math.max(0, (s - road.startS) / (road.finishS - road.startS)));
+  hud.timer.textContent = city ? `Free roam  ${formatTime(runTime)}` : run === 'idle' ? 'Drive to the start line' : formatTime(runTime);
+  const frac = city ? 0 : Math.min(1, Math.max(0, (s - road.startS) / (road.finishS - road.startS)));
   hud.progress.style.width = `${frac * 100}%`;
 
   const gp = pad ? padLabel(progress.settings.bindings.pad.ignition) : keysLabel(progress.settings.bindings.keys.ignition);
@@ -944,6 +976,9 @@ requestAnimationFrame(frame);
     return cockpit;
   },
   road,
+  city,
+  renderer,
+  scene,
   scorer,
   haptics,
   menus,

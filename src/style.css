@@ -1328,6 +1328,8 @@ dl.stats dd {
   font-weight: 800;
   text-transform: uppercase;
   line-height: 1;
+  /* Clear of the Pick / Selected badge. */
+  padding-right: 96px;
 }
 .map-text p {
   margin: 0;
@@ -1583,4 +1585,24 @@ body.retro-vhs #score {
 }
 .status.warn {
   color: #ff9a6b;
+}
+
+/* Town map for free roam: top right, turning with the car so up is always ahead. */
+#minimap {
+  position: fixed;
+  right: 14px;
+  top: 44px;
+  width: clamp(120px, 20vmin, 190px);
+  height: clamp(120px, 20vmin, 190px);
+  border-radius: 50%;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+body.in-menu #minimap {
+  display: none;
+}
+.map-art path.town,
+.map-thumb path.town {
+  stroke-width: 1.4;
+  stroke-linecap: butt;
 }

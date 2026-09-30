@@ -17,7 +17,7 @@ import {
 import type { Progress, Settings } from '../game/progress';
 import { CHASE_DISTS, CHASE_HEIGHTS, GRAPHICS_QUALITIES, MOUSE_TRAVELS, RETRO_LOOKS, SPEEDO_MODES, TIMES_OF_DAY, saveProgress } from '../game/progress';
 import { PARTS, clutchWillSlip, fitPart, ownedLevel, peakPower, peakTorque, specFor, tuneFor, tunedSpec, type Tune } from '../game/tuning';
-import { MAPS, mapById, mapStats, outlinePath, roadFor } from '../track/maps';
+import { MAPS, cityForMap, cityOutline, mapById, mapStats, outlinePath, roadFor } from '../track/maps';
 import { chooseCar, choosePaint, ownsCar, ownsPaint, paintFor } from '../game/shop';
 import type { RunStats } from '../game/scoring';
 
@@ -380,9 +380,9 @@ export class Menus {
     const grid = h('div', 'hub-grid');
     // Items are added in focus order: the hero first, so it's where the cursor starts.
     const map = mapById(st.map);
-    const hero = this.tile('hero', 'Touge run', map.name, map.blurb, 0, 1, { confirm: () => this.hooks.drive() }, "Let's drive  ›");
+    const hero = this.tile('hero', map.city ? 'Free roam' : 'Touge run', map.name, map.blurb, 0, 1, { confirm: () => this.hooks.drive() }, "Let's drive  ›");
     hero.prepend(h('div', 'hero-art'));
-    const mapTile = this.tile('map', 'Map', 'Pick a road', `${MAPS.length} roads · ${map.name} now`, 0, 2, { confirm: () => this.open('maps') }, 'Choose  ›');
+    const mapTile = this.tile('map', 'Map', 'Pick a map', `${MAPS.length} maps · ${map.name} now`, 0, 2, { confirm: () => this.open('maps') }, 'Choose  ›');
     mapTile.prepend(this.mapOutline(map.id, 'map-art'));
 
     const ride = h('div', 'menu-btn tile ride');
@@ -462,9 +462,11 @@ export class Menus {
     const svg = document.createElementNS(svgNS, 'svg');
     svg.setAttribute('viewBox', '0 0 100 100');
     svg.setAttribute('class', cls);
-    const o = outlinePath(roadFor(id), 100);
+    const city = cityForMap(id);
+    const o = city ? { ...cityOutline(city, 100), end: null } : outlinePath(roadFor(id), 100);
     const path = document.createElementNS(svgNS, 'path');
     path.setAttribute('d', o.d);
+    if (city) path.setAttribute('class', 'town');
     const dot = (p: number[], c: string) => {
       const e = document.createElementNS(svgNS, 'circle');
       e.setAttribute('cx', String(p[0]));
@@ -473,17 +475,17 @@ export class Menus {
       e.setAttribute('class', c);
       return e;
     };
-    svg.append(path, dot(o.end, 'finish'), dot(o.start, 'start'));
+    if (o.end) svg.append(path, dot(o.end, 'finish'), dot(o.start, 'start'));
+    else svg.append(path, dot(o.start, 'start'));
     return svg;
   }
 
   private renderMaps(panel: HTMLElement) {
     const st = this.progress.settings;
-    panel.append(h('h2', undefined, 'Pick a road'));
+    panel.append(h('h2', undefined, 'Pick a map'));
     const list = h('div', 'map-list');
     MAPS.forEach((m, i) => {
-      const road = roadFor(m.id);
-      const s = mapStats(road);
+      const town = cityForMap(m.id);
       const here = m.id === st.map;
       const card = h('div', `menu-btn map-card${here ? ' current' : ''}`);
       const text = h('div', 'map-text');
@@ -491,7 +493,7 @@ export class Menus {
       text.append(
         h('b', undefined, m.name),
         h('p', undefined, m.blurb),
-        h('span', 'map-stats', `${s.km.toFixed(1)} km · ${Math.abs(Math.round(s.rise))} m ${s.rise > 0 ? 'climb' : 'drop'} · ${s.hairpins} hairpins`),
+        h('span', 'map-stats', town ? townStats(town) : roadStats(m.id)),
         h('span', 'map-best', best ? `Best ${best.toLocaleString()}` : 'Not driven yet'),
       );
       card.append(this.mapOutline(m.id, 'map-thumb'), text, h('span', 'map-badge', here ? 'Selected' : 'Pick'));
@@ -901,4 +903,16 @@ export class Menus {
   private controlsHint() {
     return h('div', 'menu-hint', '✕ / Enter select · ○ / Esc back · D-pad or stick to move');
   }
+}
+
+function roadStats(id: string) {
+  const s = mapStats(roadFor(id));
+  return `${s.km.toFixed(1)} km · ${Math.abs(Math.round(s.rise))} m ${s.rise > 0 ? 'climb' : 'drop'} · ${s.hairpins} hairpins`;
+}
+
+function townStats(city: NonNullable<ReturnType<typeof cityForMap>>) {
+  const b = city.bounds;
+  const km = ((b.x1 - b.x0) * (b.z1 - b.z0)) / 1e6;
+  const shops = city.buildings.filter((x) => x.kind === 'shop' || x.kind === 'konbini').length;
+  return `Free roam · ${km.toFixed(2)} km² · ${shops} shops`;
 }
