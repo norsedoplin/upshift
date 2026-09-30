@@ -56,6 +56,7 @@ type RunState = 'idle' | 'running' | 'finished';
 let run: RunState = 'idle';
 let runTime = 0;
 let roadIndex = 0;
+let roadS = 0; // exact distance along the road; roadIndex is only the nearest 2 m sample
 let debugOn = false;
 let flash = { text: '', until: 0 };
 
@@ -113,6 +114,7 @@ function resetRun() {
   const p = road.sampleAt(road.startS - 18);
   chassis.place(p.x, p.z, p.yaw);
   roadIndex = Math.round(p.s / SAMPLE_STEP);
+  roadS = p.s;
   scorer.reset();
   run = 'idle';
   runTime = 0;
@@ -142,6 +144,7 @@ function showFlash(text: string, seconds = 1.6) {
 function collide() {
   const r = collideWithEdges(road, chassis, car, roadIndex);
   roadIndex = r.loc.index;
+  roadS = r.loc.s;
   return r;
 }
 
@@ -199,9 +202,9 @@ function frame(now: number) {
   }
 
   // Road grade along the car's heading.
-  const here = road.sampleAt(roadIndex * SAMPLE_STEP);
-  const ahead = road.sampleAt(roadIndex * SAMPLE_STEP + 2);
-  const behind = road.sampleAt(roadIndex * SAMPLE_STEP - 2);
+  const here = road.sampleAt(roadS);
+  const ahead = road.sampleAt(roadS + 2);
+  const behind = road.sampleAt(roadS - 2);
   const roadGrade = (ahead.h - behind.h) / 4;
   grade = roadGrade * Math.cos(chassis.yaw - here.yaw);
   const slope = grade / Math.sqrt(1 + grade * grade);
@@ -242,7 +245,7 @@ function frame(now: number) {
   }
 
   // Run flow: the clock starts at the start line and stops at the finish.
-  const s = roadIndex * SAMPLE_STEP;
+  const s = roadS;
   if (run === 'idle' && s >= road.startS) {
     run = 'running';
     runTime = 0;
