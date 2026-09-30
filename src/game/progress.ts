@@ -16,7 +16,12 @@ export interface Settings {
   clutchFeel: boolean; // DualSense adaptive trigger pushes back at the bite point
   timeOfDay: TimeOfDay; // cycle = the sun moves while you drive
   speedFx: boolean; // field of view widens and the view shivers a little at speed
+  retro: RetroLook; // a 90s filter over the picture
+  map: string; // which road you drive (see track/maps.ts)
 }
+
+export type RetroLook = 'off' | 'vhs' | 'console';
+export const RETRO_LOOKS: RetroLook[] = ['off', 'vhs', 'console'];
 
 export type TimeOfDay = 'cycle' | 'morning' | 'noon' | 'sunset' | 'night';
 export const TIMES_OF_DAY: TimeOfDay[] = ['cycle', 'morning', 'noon', 'sunset', 'night'];
@@ -42,6 +47,7 @@ export const CAMERA_VIEWS: CameraView[] = ['cockpit', 'hood', 'chase'];
 export interface Progress {
   creds: number;
   bestScore: number;
+  bestByMap: Record<string, number>; // best run on each road
   runs: number;
   ownedCars: string[];
   ownedPaints: string[];
@@ -53,12 +59,13 @@ export interface Progress {
 
 const KEY = 'upshift.progress.v1';
 
-export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high', speedo: 'auto', bindings: defaultBindings(), clutchFeel: true, timeOfDay: 'cycle', speedFx: true };
+export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high', speedo: 'auto', bindings: defaultBindings(), clutchFeel: true, timeOfDay: 'cycle', speedFx: true, retro: 'off', map: 'koyo' };
 
 export function defaultProgress(): Progress {
   return {
     creds: 0,
     bestScore: 0,
+    bestByMap: {},
     runs: 0,
     ownedCars: ['hatch'],
     ownedPaints: [],
@@ -98,6 +105,11 @@ export function parseProgress(raw: string | null): Progress {
     p.creds = Math.max(0, num(s.creds, 0));
     p.bestScore = Math.max(0, num(s.bestScore, 0));
     p.runs = Math.max(0, num(s.runs, 0));
+    if (s.bestByMap && typeof s.bestByMap === 'object') {
+      for (const [k, v] of Object.entries(s.bestByMap)) if (typeof v === 'number' && v > 0) p.bestByMap[k] = v;
+    }
+    // Saves from before there were maps: the old best was on the first road.
+    if (!s.bestByMap && p.bestScore > 0) p.bestByMap.koyo = p.bestScore;
     p.ownedCars = Array.from(new Set(['hatch', ...strs(s.ownedCars)]));
     p.ownedPaints = strs(s.ownedPaints);
     p.grants = strs(s.grants);
@@ -119,6 +131,8 @@ export function parseProgress(raw: string | null): Progress {
       clutchFeel: typeof st.clutchFeel === 'boolean' ? st.clutchFeel : true,
       timeOfDay: TIMES_OF_DAY.includes(st.timeOfDay) ? st.timeOfDay : DEFAULT_SETTINGS.timeOfDay,
       speedFx: typeof st.speedFx === 'boolean' ? st.speedFx : true,
+      retro: RETRO_LOOKS.includes(st.retro) ? st.retro : DEFAULT_SETTINGS.retro,
+      map: typeof st.map === 'string' ? st.map : DEFAULT_SETTINGS.map,
     };
   } catch {
     // Corrupt data: start fresh rather than crash.

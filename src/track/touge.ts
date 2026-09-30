@@ -217,8 +217,9 @@ function integrate(pieces: Piece[], start: { x: number; z: number; yaw: number }
   return pts;
 }
 
-function randomPiece(r: () => number, lastTurn: number, towardsCentre: number | null): Piece {
-  const u = r();
+function randomPiece(r: () => number, lastTurn: number, towardsCentre: number | null, twist = 0): Piece {
+  // twist > 0 skews the mix towards tight corners and hairpins, < 0 towards straights and sweepers.
+  const u = Math.min(0.999, Math.max(0, r() + twist * 0.3));
   let dir = r() < 0.7 ? -lastTurn || 1 : lastTurn || 1;
   if (towardsCentre !== null && r() < 0.8) dir = towardsCentre;
   const deg = Math.PI / 180;
@@ -242,14 +243,22 @@ export interface TougeOptions {
   seed?: number;
   length?: number;
   summit?: number;
+  /** 'up' runs the same kind of road as a hillclimb. */
+  direction?: 'down' | 'up';
+  /** -1..1: fewer or more tight corners and hairpins than usual. */
+  twist?: number;
+  /** Average grade, 0.05 = 5%. */
+  grade?: number;
 }
 
-export function generateTouge({ seed = 7, length = 4200, summit = 320 }: TougeOptions = {}): Road {
+export function generateTouge({ seed = 7, length = 4200, summit = 320, direction = 'down', twist = 0, grade = 0.05 }: TougeOptions = {}): Road {
+  // Longer roads get more room so they can still find a clean layout.
+  const bound = 750 * Math.max(1, Math.sqrt(length / 4200));
   // Try seeds until one produces a clean layout; each attempt is bounded.
   for (let attempt = 0; attempt < 50; attempt++) {
-    const pts = layout(seed + attempt * 7919, length);
+    const pts = layout(seed + attempt * 7919, length, bound, twist);
     if (pts) {
-      const road = withElevation(pts, summit);
+      const road = withElevation(pts, summit, direction === 'up' ? -1 : 1, grade);
       road.lots = placeLots(road);
       furnishLots(road);
       return road;
@@ -258,14 +267,13 @@ export function generateTouge({ seed = 7, length = 4200, summit = 320 }: TougeOp
   throw new Error('could not generate a touge layout');
 }
 
-function layout(seed: number, length: number) {
+function layout(seed: number, length: number, bound: number, twist: number) {
   const r = rng(seed);
   const start = { x: 0, z: 0, yaw: 0 };
   const pieces: Piece[] = [{ kind: 'straight', length: 90, kappa: 0 }];
   let pts = integrate(pieces, start);
   let lastTurn = 1;
   let failures = 0;
-  const bound = 750;
   const clearance = 34;
 
   for (let iter = 0; iter < 4000 && pts.length < length; iter++) {
@@ -278,7 +286,7 @@ function layout(seed: number, length: number) {
       const cross = fx * -end.z - fz * -end.x;
       towards = cross < 0 ? 1 : -1;
     }
-    const piece = randomPiece(r, lastTurn, towards);
+    const piece = randomPiece(r, lastTurn, towards, twist);
     const tail = integrate([piece, { kind: 'straight', length: 25, kappa: 0 }], end, pieces[pieces.length - 1].kappa);
     if (isClear(pts, tail, clearance, bound)) {
       pieces.push(piece);
@@ -297,15 +305,15 @@ function layout(seed: number, length: number) {
   return integrate(pieces, start);
 }
 
-function withElevation(pts: { x: number; z: number; yaw: number; kappa: number }[], summit: number) {
-  // Elevation: a descent with varying grade, flat at the start line.
+function withElevation(pts: { x: number; z: number; yaw: number; kappa: number }[], summit: number, dir: number, base: number) {
+  // Elevation: a descent (or, with dir -1, a climb) with varying grade, flat at the start line.
   const samples: RoadSample[] = [];
   let h = summit;
   for (let i = 0; i < pts.length; i++) {
     const s = i;
     const ease = Math.min(1, Math.max(0, (s - 60) / 120));
-    const grade = ease * (0.05 + 0.03 * Math.sin(s / 330 + 0.7) + 0.02 * Math.sin(s / 113 + 2.1));
-    h -= grade;
+    const grade = ease * (base + 0.03 * Math.sin(s / 330 + 0.7) + 0.02 * Math.sin(s / 113 + 2.1));
+    h -= grade * dir;
     if (s % SAMPLE_STEP === 0) samples.push({ s, x: pts[i].x, z: pts[i].z, h, yaw: pts[i].yaw, kappa: pts[i].kappa });
   }
   return new Road(samples);
