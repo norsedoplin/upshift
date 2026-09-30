@@ -16,12 +16,14 @@ export interface Settings {
   clutchFeel: boolean; // DualSense adaptive trigger pushes back at the bite point
   timeOfDay: TimeOfDay; // cycle = the sun moves while you drive
   speedFx: boolean; // field of view widens and the view shivers a little at speed
-  retro: RetroLook; // a 90s filter over the picture
+  retro: RetroLook; // the picture's look: normal, comic street style, or a 90s filter
+  mouseClutch: number; // 0 = off, else pixels of mouse travel for the whole pedal
   map: string; // which road you drive (see track/maps.ts)
 }
 
-export type RetroLook = 'off' | 'vhs' | 'console';
-export const RETRO_LOOKS: RetroLook[] = ['off', 'vhs', 'console'];
+export type RetroLook = 'off' | 'street' | 'vhs' | 'console';
+export const RETRO_LOOKS: RetroLook[] = ['off', 'street', 'vhs', 'console'];
+export const MOUSE_TRAVELS = [0, 160, 260, 420];
 
 export type TimeOfDay = 'cycle' | 'morning' | 'noon' | 'sunset' | 'night';
 export const TIMES_OF_DAY: TimeOfDay[] = ['cycle', 'morning', 'noon', 'sunset', 'night'];
@@ -59,7 +61,7 @@ export interface Progress {
 
 const KEY = 'upshift.progress.v1';
 
-export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high', speedo: 'auto', bindings: defaultBindings(), clutchFeel: true, timeOfDay: 'cycle', speedFx: true, retro: 'off', map: 'koyo' };
+export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high', speedo: 'auto', bindings: defaultBindings(), clutchFeel: true, timeOfDay: 'cycle', speedFx: true, retro: 'off', mouseClutch: 0, map: 'koyo' };
 
 export function defaultProgress(): Progress {
   return {
@@ -132,6 +134,7 @@ export function parseProgress(raw: string | null): Progress {
       timeOfDay: TIMES_OF_DAY.includes(st.timeOfDay) ? st.timeOfDay : DEFAULT_SETTINGS.timeOfDay,
       speedFx: typeof st.speedFx === 'boolean' ? st.speedFx : true,
       retro: RETRO_LOOKS.includes(st.retro) ? st.retro : DEFAULT_SETTINGS.retro,
+      mouseClutch: MOUSE_TRAVELS.includes(st.mouseClutch) ? st.mouseClutch : 0,
       map: typeof st.map === 'string' ? st.map : DEFAULT_SETTINGS.map,
     };
   } catch {

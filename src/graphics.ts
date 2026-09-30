@@ -25,28 +25,91 @@ const PRESETS: Record<GraphicsQuality, Preset> = {
 /** Half-size of the square the sun's shadow covers, centred just ahead of the car, m. */
 const SHADOW_EXTENT = 38;
 
-/** Darkens the corners a touch and adds a gentle contrast curve (runs on display colours). */
-const GradeShader = {
-  uniforms: { tDiffuse: { value: null }, vignette: { value: 0.22 } },
+/**
+ * The last touch on the normal picture: a gentle contrast curve and vignette, plus
+ * speed: the edges smear towards the centre and speed lines streak in as you go faster,
+ * with an extra kick (punch) on a good shift. With `street` on it also draws the comic
+ * look: ink outlines, banded shading, halftone dots in the shadows and punchier colour.
+ */
+const FxShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    vignette: { value: 0.22 },
+    res: { value: new THREE.Vector2(1280, 720) },
+    speed: { value: 0 },
+    punch: { value: 0 },
+    time: { value: 0 },
+    street: { value: 0 },
+  },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
     uniform float vignette;
+    uniform vec2 res;
+    uniform float speed;
+    uniform float punch;
+    uniform float time;
+    uniform int street;
     varying vec2 vUv;
+    float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+    float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+    vec3 tap(vec2 uv) { return texture2D(tDiffuse, uv).rgb; }
     void main() {
-      vec4 c = texture2D(tDiffuse, vUv);
-      vec3 s = c.rgb * c.rgb * (3.0 - 2.0 * c.rgb); // smoothstep S-curve
-      c.rgb = mix(c.rgb, s, 0.18);
       vec2 d = vUv - 0.5;
-      c.rgb *= 1.0 - vignette * smoothstep(0.25, 0.85, dot(d, d) * 2.2);
-      gl_FragColor = c;
+      float r = length(d * vec2(res.x / res.y, 1.0));
+      // Speed smear: sample back towards the centre, more at the edges.
+      float amt = (speed * 0.045 + punch * 0.05) * smoothstep(0.18, 0.8, r);
+      vec3 c = vec3(0.0);
+      for (int i = 0; i < 6; i++) c += tap(vUv - d * amt * float(i) / 5.0);
+      c /= 6.0;
+      if (amt > 0.001) {
+        // Colour fringes where the smear is strongest.
+        c.r = mix(c.r, tap(vUv + d * amt * 0.4).r, 0.45);
+        c.b = mix(c.b, tap(vUv - d * amt * 0.7).b, 0.45);
+      }
+      if (street == 1) {
+        vec2 px = 1.0 / res;
+        float tl = luma(tap(vUv + px * vec2(-1.0, 1.0))), t = luma(tap(vUv + px * vec2(0.0, 1.0))), tr = luma(tap(vUv + px * vec2(1.0, 1.0)));
+        float l = luma(tap(vUv + px * vec2(-1.0, 0.0))), rr = luma(tap(vUv + px * vec2(1.0, 0.0)));
+        float bl = luma(tap(vUv + px * vec2(-1.0, -1.0))), b = luma(tap(vUv + px * vec2(0.0, -1.0))), br = luma(tap(vUv + px * vec2(1.0, -1.0)));
+        float gx = tr + 2.0 * rr + br - tl - 2.0 * l - bl;
+        float gy = tl + 2.0 * t + tr - bl - 2.0 * b - br;
+        float ink = smoothstep(0.16, 0.42, length(vec2(gx, gy)));
+        // Punchy colour and banded light.
+        float y = luma(c);
+        c = clamp(mix(vec3(y), c, 1.45), 0.0, 1.0);
+        float band = floor(y * 4.0 + 0.5) / 4.0;
+        c *= mix(1.0, (band + 0.08) / (y + 0.08), 0.5);
+        // Halftone dots in the shadows, on a 45 degree grid.
+        vec2 g = mat2(0.7071, -0.7071, 0.7071, 0.7071) * gl_FragCoord.xy / 5.0;
+        float dotR = length(fract(g) - 0.5);
+        float shade = smoothstep(0.42, 0.08, y);
+        c *= 1.0 - 0.45 * step(dotR, 0.62 * sqrt(shade));
+        c = mix(c, vec3(0.06, 0.04, 0.1), ink * 0.9);
+      }
+      // Speed lines: thin streaks at random angles that start part way in from the edge.
+      float lines = speed * 0.55 + punch;
+      if (lines > 0.01) {
+        float ang = atan(d.y, d.x) / 6.2832 + 0.5;
+        float slot = floor(ang * 180.0);
+        float seed = slot + floor(time * 14.0) * 57.0;
+        float on = step(0.86, hash(seed));
+        float from = 0.28 + 0.3 * hash(seed + 3.1);
+        float across = abs(fract(ang * 180.0) - 0.5);
+        float line = on * smoothstep(from, from + 0.15, r) * smoothstep(0.45, 0.1, across);
+        c = mix(c, vec3(1.0), clamp(line * lines * 0.5, 0.0, 0.55));
+      }
+      vec3 s = c * c * (3.0 - 2.0 * c); // smoothstep S-curve
+      c = mix(c, s, 0.18);
+      c *= 1.0 - (vignette + speed * 0.12) * smoothstep(0.25, 0.85, dot(d, d) * 2.2);
+      gl_FragColor = vec4(c, 1.0);
     }`,
 };
 
 /** Internal picture height for each 90s look; the result is scaled up to the screen. */
-const RETRO_HEIGHT: Record<Exclude<RetroLook, 'off'>, number> = { vhs: 400, console: 232 };
+const RETRO_HEIGHT: Partial<Record<RetroLook, number>> = { vhs: 400, console: 232 };
 
 /**
  * The 90s looks, drawn last over the finished picture.
@@ -112,6 +175,11 @@ export class Graphics {
   quality: GraphicsQuality = 'high';
   retro: RetroLook = 'off';
   private retroPass: ShaderPass | null = null;
+  private fxPass: ShaderPass | null = null;
+  /** Speed smear and speed lines (Settings › Speed effects). */
+  speedFx = true;
+  private speed = 0;
+  private punch = 0;
   private composer: EffectComposer | null = null;
   private renderPass: RenderPass | null = null;
   private size = new THREE.Vector2(1, 1);
@@ -175,7 +243,19 @@ export class Graphics {
     this.rebuildComposer();
   }
 
-  /** Switch the 90s filter. */
+  /** How fast the car is going (0..1) and a shift kick (0..1), for the speed effects. */
+  setMotion(speed: number, punch: number) {
+    this.speed = this.speedFx ? speed : 0;
+    this.punch = this.speedFx ? punch : 0;
+  }
+
+  setSpeedFx(on: boolean) {
+    if (on === this.speedFx) return;
+    this.speedFx = on;
+    this.rebuildComposer();
+  }
+
+  /** Switch the look (normal, street, or a 90s filter). */
   setRetro(look: RetroLook) {
     if (look === this.retro) return;
     this.retro = look;
@@ -187,7 +267,10 @@ export class Graphics {
     this.composer = null;
     this.renderPass = null;
     this.retroPass = null;
-    if (PRESETS[this.quality].post || this.retro !== 'off') this.buildComposer();
+    this.fxPass = null;
+    // Low keeps a plain render unless a look needs the extra passes.
+    const wantFx = this.speedFx && this.quality !== 'low';
+    if (PRESETS[this.quality].post || this.retro !== 'off' || wantFx) this.buildComposer();
     this.setSize(this.size.x, this.size.y);
   }
 
@@ -201,8 +284,10 @@ export class Graphics {
     // Only things brighter than white bloom: the sun, lamps and reflector glints.
     if (PRESETS[this.quality].post && retro !== 'console') composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), 0.35, 0.5, 1.0));
     composer.addPass(new OutputPass());
-    if (retro === 'off') composer.addPass(new ShaderPass(GradeShader));
-    else {
+    this.fxPass = new ShaderPass(FxShader);
+    this.fxPass.uniforms.street.value = retro === 'street' ? 1 : 0;
+    composer.addPass(this.fxPass);
+    if (retro === 'vhs' || retro === 'console') {
       this.retroPass = new ShaderPass(RetroShader);
       this.retroPass.uniforms.mode.value = retro === 'console' ? 1 : 0;
       composer.addPass(this.retroPass);
@@ -215,9 +300,11 @@ export class Graphics {
     this.renderer.setSize(w, h);
     if (this.composer) {
       // The 90s looks draw the world at a low resolution and scale it up.
-      const retroH = this.retro === 'off' ? 0 : RETRO_HEIGHT[this.retro];
+      const retroH = RETRO_HEIGHT[this.retro] ?? 0;
       this.composer.setPixelRatio(retroH ? Math.min(this.renderer.getPixelRatio(), retroH / Math.max(1, h)) : this.renderer.getPixelRatio());
       this.composer.setSize(w, h);
+      const pr = this.renderer.getPixelRatio();
+      this.fxPass?.uniforms.res.value.set(w * pr, h * pr);
       if (this.retroPass) {
         const k = retroH / Math.max(1, h);
         this.retroPass.uniforms.res.value.set(Math.round(w * k), retroH);
@@ -245,7 +332,14 @@ export class Graphics {
   render(camera: THREE.Camera) {
     if (this.composer && this.renderPass) {
       this.renderPass.camera = camera;
-      if (this.retroPass) this.retroPass.uniforms.time.value = performance.now() / 1000;
+      const t = performance.now() / 1000;
+      if (this.retroPass) this.retroPass.uniforms.time.value = t;
+      if (this.fxPass) {
+        const u = this.fxPass.uniforms;
+        u.time.value = t;
+        u.speed.value = this.speed;
+        u.punch.value = this.punch;
+      }
       this.composer.render();
     } else {
       this.renderer.render(this.scene, camera);

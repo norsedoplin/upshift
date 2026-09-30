@@ -15,7 +15,7 @@ import {
   type PadInput,
 } from '../bindings';
 import type { Progress, Settings } from '../game/progress';
-import { GRAPHICS_QUALITIES, RETRO_LOOKS, SPEEDO_MODES, TIMES_OF_DAY, saveProgress } from '../game/progress';
+import { GRAPHICS_QUALITIES, MOUSE_TRAVELS, RETRO_LOOKS, SPEEDO_MODES, TIMES_OF_DAY, saveProgress } from '../game/progress';
 import { MAPS, mapById, mapStats, outlinePath, roadFor } from '../track/maps';
 import { chooseCar, choosePaint, ownsCar, ownsPaint, paintFor } from '../game/shop';
 import type { RunStats } from '../game/scoring';
@@ -609,6 +609,7 @@ export class Menus {
         list.append(link);
         option('Clutch trigger feel', row++, ['On', 'Off'], st.clutchFeel ? 0 : 1, (i) => (st.clutchFeel = i === 0));
       }
+      option('Mouse clutch', row++, ['Off', 'Short travel', 'Normal travel', 'Long travel'], Math.max(0, MOUSE_TRAVELS.indexOf(st.mouseClutch)), (i) => (st.mouseClutch = MOUSE_TRAVELS[i]));
       const controls = this.button('Controls', row++, () => this.open('controls'), 'menu-btn setting');
       controls.append(h('span', 'value', '›'));
       list.append(controls);
@@ -619,7 +620,7 @@ export class Menus {
       option('Field of view', row++, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
       option('On-screen speedo', row++, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
       option('Speed effects', row++, ['On', 'Off'], st.speedFx ? 0 : 1, (i) => (st.speedFx = i === 0));
-      option('90s filter', row++, ['Off', 'VHS tape', '32-bit console'], RETRO_LOOKS.indexOf(st.retro), (i) => (st.retro = RETRO_LOOKS[i]));
+      option('Look', row++, ['Normal', 'Street (comic)', '90s VHS tape', '90s 32-bit console'], RETRO_LOOKS.indexOf(st.retro), (i) => (st.retro = RETRO_LOOKS[i]));
       option('Time of day', row++, ['Day cycle', 'Morning', 'Noon', 'Sunset', 'Night'], TIMES_OF_DAY.indexOf(st.timeOfDay), (i) => (st.timeOfDay = TIMES_OF_DAY[i]));
       option('Graphics', row++, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
     } else {
