@@ -28,7 +28,7 @@ export interface Cockpit {
   clutchPedal: THREE.Mesh;
   brakePedal: THREE.Mesh;
   throttlePedal: THREE.Mesh;
-  paint: THREE.MeshLambertMaterial;
+  paint: THREE.MeshStandardMaterial;
   dispose(): void;
 }
 
@@ -38,14 +38,18 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   cabin.position.y = -spec.seatDrop;
   root.add(cabin);
 
-  const mat = (c: THREE.ColorRepresentation, emissive?: THREE.ColorRepresentation) =>
-    new THREE.MeshLambertMaterial({ color: c, flatShading: true, emissive: emissive ?? 0x000000 });
-  const interior = mat(spec.trim);
-  const interiorLight = mat(spec.trimLight);
-  const accent = mat(spec.accent);
-  const dark = mat('#141518');
-  const metal = mat('#9ea2a8');
-  const paint = mat(COLORS.paint);
+  const mat = (c: THREE.ColorRepresentation, emissive?: THREE.ColorRepresentation, roughness = 0.75, metalness = 0) =>
+    // Extra ambient from the sky keeps the cabin readable when it's in the roof's shadow.
+    new THREE.MeshStandardMaterial({ color: c, flatShading: true, emissive: emissive ?? 0x000000, roughness, metalness, envMapIntensity: 1.8 });
+  const interior = mat(spec.trim, undefined, 0.85);
+  const interiorLight = mat(spec.trimLight, undefined, 0.7);
+  const accent = mat(spec.accent, undefined, 0.6);
+  const dark = mat('#141518', undefined, 0.6);
+  const metal = mat('#b4b8be', undefined, 0.3, 0.9);
+  const mirror = mat('#c9d4df', undefined, 0.02, 1);
+  // The hood you look out over is clear-coated too, but seen at a grazing angle, so its
+  // reflections are toned down or it washes out to sky colour.
+  const paint = new THREE.MeshPhysicalMaterial({ color: COLORS.paint, flatShading: true, roughness: 0.45, metalness: 0.05, clearcoat: 0.6, clearcoatRoughness: 0.12, envMapIntensity: 0.6 });
   const add = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, parent: THREE.Object3D = cabin) => {
     const mesh = new THREE.Mesh(geo, m);
     mesh.position.set(x, y, z);
@@ -75,7 +79,7 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   box(0.5, 0.012, 0.02, dark, 0.3, 0.905, -1.1, 0, 0.14);
   for (const side of [-1, 1]) {
     box(0.1, 0.09, 0.14, paint, side * 0.98, 1.0, -0.72);
-    box(0.085, 0.07, 0.005, mat('#8fa3b8'), side * 0.98, 1.0, -0.648); // mirror glass, facing back
+    box(0.085, 0.07, 0.005, mirror, side * 0.98, 1.0, -0.648); // mirror glass, facing back
     box(0.1, 0.02, 0.04, dark, side * 0.9, 0.98, -0.72);
   }
 
@@ -130,7 +134,7 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   box(1.66, 0.06, 0.5, interiorLight, 0, 1.6, -0.25);
   box(0.02, 0.06, 0.02, dark, 0.02, 1.55, -0.47);
   box(0.24, 0.07, 0.03, dark, 0.02, 1.5, -0.48);
-  box(0.2, 0.05, 0.005, mat('#8fa3b8'), 0.02, 1.5, -0.464);
+  box(0.2, 0.05, 0.005, mirror, 0.02, 1.5, -0.464);
   for (const x of [-0.42, 0.42]) box(0.5, 0.02, 0.2, interiorLight, x, 1.565, -0.46, 0.25);
 
   // ---- Doors ----
@@ -216,6 +220,11 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   const clutchPedal = add(pedalGeo, pedalMat, -0.52, 0.35, -0.55);
   const brakePedal = add(pedalGeo, pedalMat, -0.38, 0.35, -0.55);
   const throttlePedal = add(new THREE.BoxGeometry(0.05, 0.14, 0.02), pedalMat, -0.24, 0.33, -0.55);
+
+  root.traverse((o) => {
+    o.castShadow = true;
+    o.receiveShadow = true;
+  });
 
   const eye = new THREE.Vector3(-0.37, 1.2, 0.1);
   const head = new THREE.Group();

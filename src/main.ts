@@ -8,7 +8,8 @@ import { EngineAudio } from './audio';
 import { buildCockpit, shifterPose } from './cockpit';
 import { drawCluster, gearLabel } from './gauges';
 import { generateTouge, SAMPLE_STEP } from './track/touge';
-import { buildScenery } from './track/scenery';
+import { buildScenery, buildEnvironmentScene, SUN_DIR } from './track/scenery';
+import { Graphics, bakeEnvironment } from './graphics';
 import { collideWithEdges } from './track/collide';
 import { Scorer, credsForRun, ScoreEvent } from './game/scoring';
 import { CAMERA_VIEWS, loadProgress, saveProgress } from './game/progress';
@@ -20,14 +21,15 @@ import { buildCarModel } from './ui/carModel';
 
 const SIM_DT = 0.001;
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 document.getElementById('app')!.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const road = generateTouge();
-buildScenery(scene, road);
+const scenery = buildScenery(scene, road);
+const graphics = new Graphics(renderer, scene, scenery.sun, SUN_DIR);
+scene.environment = bakeEnvironment(renderer, buildEnvironmentScene());
+scene.environmentIntensity = 0.8;
 const showroom = new Showroom();
 
 const progress = loadProgress();
@@ -117,10 +119,15 @@ function applyCar() {
   exterior.paintMat.color.set(paint);
 }
 
+let graphicsReady = false;
 function applySettings() {
   const st = progress.settings;
   haptics.strength = st.rumble;
   audio.setVolume(st.volume);
+  if (st.graphics !== graphics.quality || !graphicsReady) {
+    graphics.setQuality(st.graphics);
+    graphicsReady = true;
+  }
   attachCamera();
   resize();
 }
@@ -174,7 +181,7 @@ resetRun();
 function resize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  renderer.setSize(w, h);
+  graphics.setSize(w, h);
   camera.aspect = w / h;
   // The setting is for landscape screens; portrait needs a wider view to see the road.
   camera.fov = Math.min(110, progress.settings.fov + (w / h < 1 ? 20 : 0));
@@ -200,6 +207,7 @@ let time = 0;
 let pitch = 0;
 let grade = 0;
 let driveTime = 0;
+const shadowFocus = new THREE.Vector3();
 
 function frame(now: number) {
   requestAnimationFrame(frame);
@@ -222,7 +230,7 @@ function frame(now: number) {
     if (menus.screen === 'garage') {
       showroom.render(renderer, dt, window.innerWidth / window.innerHeight);
     } else {
-      renderer.render(scene, camera);
+      graphics.render(camera);
     }
     return;
   }
@@ -343,7 +351,10 @@ function frame(now: number) {
   cockpit.cluster.needsUpdate = true;
 
   updateHud(c.clutch, c.brake, c.throttle, pad, s);
-  renderer.render(scene, camera);
+  // Shadows cover the area just ahead of the car, where you're looking.
+  shadowFocus.set(chassis.x - Math.sin(chassis.yaw) * 14, loc.h, chassis.z - Math.cos(chassis.yaw) * 14);
+  graphics.follow(shadowFocus);
+  graphics.render(camera);
 }
 
 /** A camera that trails the car, lagging a little in yaw so corners are readable. */
@@ -500,4 +511,5 @@ requestAnimationFrame(frame);
   finishRun,
   applyCar,
   applySettings,
+  graphics,
 };

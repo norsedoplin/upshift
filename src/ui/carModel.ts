@@ -31,17 +31,27 @@ const TUMBLEHOME = 0.22; // how much the glasshouse narrows towards the roof
 
 export function buildCarModel(body: BodyShape, paint: THREE.Color) {
   const g = new THREE.Group();
-  const flat = (c: THREE.ColorRepresentation, emissive?: THREE.ColorRepresentation) =>
-    new THREE.MeshLambertMaterial({ color: c, flatShading: true, emissive: emissive ?? 0x000000 });
-  const paintMat = flat(paint);
-  const glass = new THREE.MeshLambertMaterial({ color: '#1a2230', flatShading: true, side: THREE.DoubleSide });
-  const black = flat('#16171a');
-  const trim = flat('#2a2c31');
-  const rubber = flat('#141416');
-  const silver = flat('#b9bcc2');
-  const chrome = flat('#8d9096');
-  const headlight = flat('#fff4d6', '#6a6350');
-  const taillight = flat('#c8261f', '#4a0c08');
+  const flat = (c: THREE.ColorRepresentation, emissive?: THREE.ColorRepresentation, roughness = 0.6, metalness = 0) =>
+    new THREE.MeshStandardMaterial({ color: c, flatShading: true, emissive: emissive ?? 0x000000, roughness, metalness });
+  // Glossy clear-coated paint: the facets pick up the sky and the sun's highlight.
+  const paintMat = new THREE.MeshPhysicalMaterial({
+    color: paint,
+    flatShading: true,
+    roughness: 0.42,
+    metalness: 0.08,
+    clearcoat: 1,
+    clearcoatRoughness: 0.07,
+  });
+  const glass = new THREE.MeshStandardMaterial({ color: '#141a24', flatShading: true, side: THREE.DoubleSide, roughness: 0.05, metalness: 0, envMapIntensity: 1.3 });
+  const black = flat('#16171a', undefined, 0.7);
+  const trim = flat('#2a2c31', undefined, 0.55);
+  const rubber = flat('#141416', undefined, 0.95);
+  const silver = flat('#c4c7cc', undefined, 0.3, 0.85);
+  const chrome = flat('#e2e4e8', undefined, 0.12, 1);
+  const headlight = flat('#fff4d6', '#ffe8b8', 0.1);
+  headlight.emissiveIntensity = 0.55;
+  const taillight = flat('#c8261f', '#ff2412', 0.2);
+  taillight.emissiveIntensity = 0.35;
   const plate = flat('#ecebe4');
 
   const { length: L, width: W, height: H, cabinHeight: CH, wheelRadius: R } = body;
@@ -224,7 +234,7 @@ export function buildCarModel(body: BodyShape, paint: THREE.Color) {
       box(0.34, 0.12, 0.1, headlight, x, lightY, nose + 0.05);
     }
     // Indicators under the lamps.
-    box(0.12, 0.04, 0.06, flat('#f2a33a', '#4a2c08'), side * (W / 2 - 0.2), rh + 0.2, nose + 0.02);
+    box(0.12, 0.04, 0.06, flat('#f2a33a', '#4a2c08', 0.2), side * (W / 2 - 0.2), rh + 0.2, nose + 0.02);
   });
   box(W * 0.34, 0.11, 0.08, black, 0, lightY, nose + 0.04); // grille
   box(W * 0.62, 0.07, 0.08, black, 0, rh + 0.1, nose + 0.1); // lower intake
@@ -276,5 +286,9 @@ export function buildCarModel(body: BodyShape, paint: THREE.Color) {
     mirrored((side) => box(0.02, 0.1, 0.3, trim, side * (W * 0.47), deckEnd + 0.17, wz));
   }
 
+  g.traverse((o) => {
+    o.castShadow = true;
+    o.receiveShadow = true;
+  });
   return { group: g, paintMat };
 }

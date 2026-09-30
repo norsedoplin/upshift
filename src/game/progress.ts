@@ -8,6 +8,19 @@ export interface Settings {
   hints: boolean;
   camera: CameraView;
   fov: number; // degrees, horizontal screens; portrait screens add 20
+  graphics: GraphicsQuality;
+}
+
+export type GraphicsQuality = 'low' | 'medium' | 'high';
+export const GRAPHICS_QUALITIES: GraphicsQuality[] = ['low', 'medium', 'high'];
+
+/** Phones and tablets start on Medium; everything else on High. */
+export function defaultGraphics(): GraphicsQuality {
+  try {
+    return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? 'medium' : 'high';
+  } catch {
+    return 'high';
+  }
 }
 
 export type CameraView = 'cockpit' | 'hood' | 'chase';
@@ -27,7 +40,7 @@ export interface Progress {
 
 const KEY = 'upshift.progress.v1';
 
-export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60 };
+export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high' };
 
 export function defaultProgress(): Progress {
   return {
@@ -38,7 +51,7 @@ export function defaultProgress(): Progress {
     ownedPaints: [],
     car: 'hatch',
     paintByCar: {},
-    settings: { ...DEFAULT_SETTINGS },
+    settings: { ...DEFAULT_SETTINGS, graphics: defaultGraphics() },
     grants: [],
   };
 }
@@ -84,6 +97,7 @@ export function parseProgress(raw: string | null): Progress {
       hints: typeof st.hints === 'boolean' ? st.hints : true,
       camera: CAMERA_VIEWS.includes(st.camera) ? st.camera : DEFAULT_SETTINGS.camera,
       fov: Math.round(Math.min(100, Math.max(50, num(st.fov, DEFAULT_SETTINGS.fov))) / 5) * 5,
+      graphics: GRAPHICS_QUALITIES.includes(st.graphics) ? st.graphics : p.settings.graphics,
     };
   } catch {
     // Corrupt data: start fresh rather than crash.
