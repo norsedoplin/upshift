@@ -81,13 +81,16 @@ export class Showroom {
     this.orbit(rx * 2.2 * dt, -ry * 1.2 * dt, dz(zoom) * 1.2 * dt);
   }
 
+  /** Soft studio reflections for the paint, baked once. */
+  private ensureEnvironment(renderer: THREE.WebGLRenderer) {
+    if (this.scene.environment) return;
+    const pm = new THREE.PMREMGenerator(renderer);
+    this.scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+    pm.dispose();
+  }
+
   render(renderer: THREE.WebGLRenderer, dt: number, aspect: number) {
-    // Soft studio reflections for the paint, baked once.
-    if (!this.scene.environment) {
-      const pm = new THREE.PMREMGenerator(renderer);
-      this.scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
-      pm.dispose();
-    }
+    this.ensureEnvironment(renderer);
     // The turntable spins on its own until you take the camera, and again after a few idle seconds.
     this.idle += dt;
     if (this.idle > 4) this.angle += dt * 0.35 * Math.min(1, (this.idle - 4) / 1.5);
@@ -103,5 +106,28 @@ export class Showroom {
     this.camera.lookAt(target);
     this.camera.updateProjectionMatrix();
     renderer.render(this.scene, this.camera);
+  }
+
+  /** Draw the car, centred, into one rectangle of the screen (CSS pixels): the main menu's ride tile. */
+  renderInto(renderer: THREE.WebGLRenderer, dt: number, rect: { left: number; top: number; width: number; height: number }) {
+    if (rect.width < 2 || rect.height < 2) return;
+    this.ensureEnvironment(renderer);
+    this.idle += dt;
+    this.angle += dt * 0.3;
+    this.holder.rotation.y = this.angle;
+    const h = renderer.domElement.clientHeight;
+    const y = h - rect.top - rect.height;
+    this.camera.aspect = rect.width / rect.height;
+    // Fit the car's length (about 4.5 m) to the narrower side of the tile.
+    this.camera.fov = this.camera.aspect > 1.2 ? 26 : 26 * Math.min(1.8, 1.2 / this.camera.aspect);
+    this.camera.position.set(0, Math.sin(0.22) * 9.5, Math.cos(0.22) * 9.5);
+    this.camera.lookAt(0, 0.55, 0);
+    this.camera.updateProjectionMatrix();
+    renderer.setScissorTest(true);
+    renderer.setScissor(rect.left, y, rect.width, rect.height);
+    renderer.setViewport(rect.left, y, rect.width, rect.height);
+    renderer.render(this.scene, this.camera);
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, renderer.domElement.clientWidth, h);
   }
 }

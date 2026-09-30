@@ -19,6 +19,34 @@ export interface RoadLocation {
 
 export const SAMPLE_STEP = 2;
 
+/** A flat pull-off beside the road: somewhere to stop, park and take in the view. */
+export interface Lot {
+  s0: number; // where it opens off the road
+  s1: number; // where it rejoins
+  side: 1 | -1; // 1 = left of the direction of travel
+  depth: number; // how far it reaches past the road's edge, m
+}
+
+/** Something standing in a lot: a parked car, a pair of vending machines, a lamp. */
+export interface LotProp {
+  kind: 'car' | 'vending' | 'lamp';
+  x: number;
+  z: number;
+  h: number;
+  yaw: number; // heading of the prop (the car's nose, the vending machine's front)
+  variant: number; // which car and paint; for a lamp, the side of the road it stands on
+}
+
+/** Round things the car bumps into (the lots' parked cars and machines). */
+export interface Obstacle {
+  x: number;
+  z: number;
+  r: number;
+}
+
+/** Metres at each end of a lot where its edge angles in from the road. */
+export const LOT_RAMP = 10;
+
 interface Piece {
   length: number;
   kappa: number;
@@ -38,10 +66,13 @@ function rng(seed: number) {
 
 export class Road {
   samples: RoadSample[];
-  halfWidth = 3.6; // lane edges
-  wallOffset = 4.9; // where the guardrail / rock face stops the car
-  startS = 30;
+  halfWidth = 3.0; // lane edges: a narrow two-lane mountain road
+  wallOffset = 4.1; // where the guardrail / rock face stops the car
+  startS = 70;
   finishS: number;
+  lots: Lot[] = [];
+  props: LotProp[] = [];
+  obstacles: Obstacle[] = [];
   private grid = new Map<string, number[]>();
   private cell = 32;
 
@@ -54,6 +85,16 @@ export class Road {
       if (!list) this.grid.set(k, (list = []));
       list.push(i);
     }
+  }
+
+  /** How far a lot widens the road on one side at distance s (0 where there is none). */
+  lotDepth(s: number, side: number) {
+    for (const l of this.lots) {
+      if (l.side !== side || s <= l.s0 || s >= l.s1) continue;
+      const t = Math.min(s - l.s0, l.s1 - s) / LOT_RAMP;
+      return l.depth * Math.min(1, t);
+    }
+    return 0;
   }
 
   get length() {
@@ -207,7 +248,12 @@ export function generateTouge({ seed = 7, length = 4200, summit = 320 }: TougeOp
   // Try seeds until one produces a clean layout; each attempt is bounded.
   for (let attempt = 0; attempt < 50; attempt++) {
     const pts = layout(seed + attempt * 7919, length);
-    if (pts) return withElevation(pts, summit);
+    if (pts) {
+      const road = withElevation(pts, summit);
+      road.lots = placeLots(road);
+      furnishLots(road);
+      return road;
+    }
   }
   throw new Error('could not generate a touge layout');
 }
@@ -280,4 +326,97 @@ function isClear(pts: { x: number; z: number }[], tail: { x: number; z: number }
     }
   }
   return true;
+}
+
+
+/**
+ * One lot by the start line, then more along the way on the gentler stretches, spaced out so
+ * there's one every few minutes of driving.
+ */
+export function placeLots(road: Road): Lot[] {
+  const lots: Lot[] = [{ s0: 6, s1: 62, side: -1, depth: 13 }];
+  const len = 60;
+  let s = 700;
+  let n = 0;
+  while (s < road.finishS - 300) {
+    // Straightest window of track in the next 300 m.
+    let best = -1;
+    let bestK = Infinity;
+    for (let c = s; c < s + 300; c += 10) {
+      let k = 0;
+      for (let d = -8; d <= len + 8; d += 4) k = Math.max(k, Math.abs(road.sampleAt(c + d).kappa));
+      if (k < bestK) {
+        bestK = k;
+        best = c;
+      }
+    }
+    const k = road.sampleAt(best + len / 2).kappa;
+    // Open on the inside of a gentle curve (the outside is where the rail and the drop are).
+    const side: 1 | -1 = Math.abs(k) > 1 / 1000 ? (k > 0 ? 1 : -1) : n % 2 ? 1 : -1;
+    if (bestK < 1 / 120 && lotIsClear(road, best, best + len, side, 11)) {
+      lots.push({ s0: best, s1: best + len, side, depth: 11 });
+      n++;
+      s = best + 700;
+    } else s += 300;
+  }
+  return lots;
+}
+
+/** A lot's far edge must stay well clear of every other stretch of road. */
+function lotIsClear(road: Road, s0: number, s1: number, side: number, depth: number) {
+  for (let s = s0; s <= s1; s += 6) {
+    const p = road.sampleAt(s);
+    const off = side * (road.wallOffset + depth);
+    const x = p.x - Math.cos(p.yaw) * off;
+    const z = p.z + Math.sin(p.yaw) * off;
+    for (const i of road.near(x, z, 30)) {
+      const q = road.samples[i];
+      if (Math.abs(q.s - s) > 60 && Math.hypot(q.x - x, q.z - z) < 22) return false;
+    }
+  }
+  return true;
+}
+
+function hash01(a: number, b: number) {
+  const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+/** A point beside the road: `offset` metres to the left (negative = right) of the centreline at s. */
+export function roadPoint(road: Road, s: number, offset: number) {
+  const p = road.sampleAt(s);
+  return { x: p.x - Math.cos(p.yaw) * offset, z: p.z + Math.sin(p.yaw) * offset, h: p.h, yaw: p.yaw };
+}
+
+/** Lamps along each lot's back edge, parked cars in some bays, vending machines in a few. */
+function furnishLots(road: Road) {
+  road.lots.forEach((lot, n) => {
+    const side = lot.side;
+    const outer = road.wallOffset + lot.depth;
+    const a = lot.s0 + LOT_RAMP + 1;
+    const b = lot.s1 - LOT_RAMP - 1;
+    for (let s = a + 1; s < b; s += 18) {
+      const p = roadPoint(road, s, side * (outer + 0.55));
+      road.props.push({ kind: 'lamp', ...p, yaw: p.yaw, variant: side });
+    }
+    if (n % 2 === 0) {
+      for (let k = 0; k < 2; k++) {
+        const p = roadPoint(road, b - 1.2 - k * 1.05, side * (outer - 0.55));
+        // Faces the road.
+        road.props.push({ kind: 'vending', ...p, yaw: p.yaw - side * (Math.PI / 2), variant: k });
+        road.obstacles.push({ x: p.x, z: p.z, r: 0.6 });
+      }
+    }
+    const bays = Math.floor((b - 4 - a) / 3);
+    const cars = n === 0 ? 2 : 1;
+    for (let c = 0; c < cars; c++) {
+      const bay = Math.floor(hash01(n, c + 1) * bays);
+      const s = a + 1.5 + bay * 3 + (c > 0 && bay === Math.floor(hash01(n, 1) * bays) ? 3 : 0);
+      const p = roadPoint(road, s, side * (outer - 2.6));
+      // Nose in, towards the rail.
+      const yaw = p.yaw + side * (Math.PI / 2);
+      road.props.push({ kind: 'car', ...p, yaw, variant: Math.floor(hash01(n, c + 7) * 1000) });
+      for (const d of [-1.2, 1.2]) road.obstacles.push({ x: p.x - Math.sin(yaw) * d, z: p.z - Math.cos(yaw) * d, r: 0.95 });
+    }
+  });
 }
