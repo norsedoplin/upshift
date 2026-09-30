@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultProgress, parseProgress } from './progress';
+import { applyGrants, defaultProgress, parseProgress } from './progress';
 import { chooseCar, choosePaint, paintFor } from './shop';
 
 describe('progress', () => {
@@ -11,6 +11,15 @@ describe('progress', () => {
     expect(p.settings.rumble).toBe(1);
   });
 
+  it('gives the playtest creds once, even to old saves', () => {
+    const p = parseProgress(JSON.stringify({ creds: 420, bestScore: 900, runs: 3 }));
+    expect(applyGrants(p)).toBe(true);
+    expect(p.creds).toBe(6420);
+    const again = parseProgress(JSON.stringify(p));
+    expect(applyGrants(again)).toBe(false);
+    expect(again.creds).toBe(6420);
+  });
+
   it('survives garbage', () => {
     expect(parseProgress('{not json').creds).toBe(0);
     const p = parseProgress(JSON.stringify({ creds: 'lots', car: 'ronin', settings: { units: 'furlongs', rumble: 7 } }));
@@ -18,6 +27,15 @@ describe('progress', () => {
     expect(p.car).toBe('hatch'); // not owned
     expect(p.settings.units).toBe('kmh');
     expect(p.settings.rumble).toBe(1);
+    expect(p.settings.camera).toBe('cockpit');
+    expect(p.settings.fov).toBe(60);
+  });
+
+  it('keeps camera settings in range', () => {
+    const p = parseProgress(JSON.stringify({ settings: { camera: 'drone', fov: 170 } }));
+    expect(p.settings.camera).toBe('cockpit');
+    expect(p.settings.fov).toBe(100);
+    expect(parseProgress(JSON.stringify({ settings: { camera: 'chase', fov: 73 } })).settings).toMatchObject({ camera: 'chase', fov: 75 });
   });
 });
 

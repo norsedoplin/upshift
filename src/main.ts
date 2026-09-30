@@ -8,31 +8,39 @@ import { EngineAudio } from './audio';
 import { buildCockpit, shifterPose } from './cockpit';
 import { drawCluster, gearLabel } from './gauges';
 import { generateTouge, SAMPLE_STEP } from './track/touge';
-import { buildScenery } from './track/scenery';
+import { buildScenery, buildEnvironmentScene, SUN_DIR } from './track/scenery';
+import { Graphics, bakeEnvironment } from './graphics';
 import { collideWithEdges } from './track/collide';
 import { Scorer, credsForRun, ScoreEvent } from './game/scoring';
-import { loadProgress, saveProgress } from './game/progress';
+import { CAMERA_VIEWS, loadProgress, saveProgress } from './game/progress';
 import { paintFor } from './game/shop';
 import { carById, forwardGears } from './cars';
 import { Menus } from './ui/menus';
 import { Showroom } from './ui/showroom';
+import { buildCarModel } from './ui/carModel';
 
 const SIM_DT = 0.001;
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 document.getElementById('app')!.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const road = generateTouge();
-buildScenery(scene, road);
-const cockpit = buildCockpit();
-scene.add(cockpit.root);
+const scenery = buildScenery(scene, road);
+const graphics = new Graphics(renderer, scene, scenery.sun, SUN_DIR);
+scene.environment = bakeEnvironment(renderer, buildEnvironmentScene());
+scene.environmentIntensity = 0.8;
 const showroom = new Showroom();
 
 const progress = loadProgress();
 let model = carById(progress.car);
+let cockpit = buildCockpit(model.interior);
+scene.add(cockpit.root);
+// The body you see from outside (chase view). Its origin is on the ground.
+let exterior = buildCarModel(model.body, new THREE.Color(paintFor(progress, model.id).color));
+scene.add(exterior.group);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.03, 3000);
+const chaseCam = { pos: new THREE.Vector3(), yaw: 0, ready: false };
 let car = new Car(model.spec);
 let chassis = new Chassis(model.chassis);
 let gearSequence = [-1, 0, ...forwardGears(model.spec)];
@@ -49,6 +57,7 @@ const biteCanvas = $('bite') as HTMLCanvasElement;
 const padStatus = $('pad-status');
 const pedals = { clutch: $('bar-clutch'), brake: $('bar-brake'), throttle: $('bar-throttle') };
 const hint = $('hint');
+const miniHud = { root: $('minihud'), gear: $('mini-gear'), speed: $('mini-speed'), rpm: $('mini-rpm') };
 const hud = { score: $('score'), combo: $('combo'), creds: $('creds'), timer: $('timer'), progress: $('progress-fill') };
 const toasts = $('toasts');
 
@@ -56,6 +65,7 @@ type RunState = 'idle' | 'running' | 'finished';
 let run: RunState = 'idle';
 let runTime = 0;
 let roadIndex = 0;
+let roadS = 0; // exact distance along the road; roadIndex is only the nearest 2 m sample
 let debugOn = false;
 let flash = { text: '', until: 0 };
 
@@ -91,21 +101,64 @@ $('loading').remove();
 function applyCar() {
   const next = carById(progress.car);
   const paint = paintFor(progress, next.id).color;
-  cockpit.paint.color.set(paint);
   if (next.id !== model.id) {
     model = next;
+    scene.remove(cockpit.root, exterior.group);
+    cockpit.dispose();
+    cockpit = buildCockpit(model.interior);
+    exterior = buildCarModel(model.body, new THREE.Color(paint));
+    scene.add(cockpit.root, exterior.group);
+    attachCamera();
     car = new Car(model.spec);
     chassis = new Chassis(model.chassis);
     gearSequence = [-1, 0, ...forwardGears(model.spec)];
     audio.setEngine(model.cylinders);
     resetRun();
   }
+  cockpit.paint.color.set(paint);
+  exterior.paintMat.color.set(paint);
 }
 
+let graphicsReady = false;
 function applySettings() {
   const st = progress.settings;
   haptics.strength = st.rumble;
   audio.setVolume(st.volume);
+  if (st.graphics !== graphics.quality || !graphicsReady) {
+    graphics.setQuality(st.graphics);
+    graphicsReady = true;
+  }
+  attachCamera();
+  resize();
+}
+
+/** Cockpit view rides on the driver's head; hood view sits on the bonnet; chase view follows in world space. */
+function attachCamera() {
+  const view = progress.settings.camera;
+  camera.removeFromParent();
+  camera.position.set(0, 0, 0);
+  camera.rotation.set(0, 0, 0);
+  if (view === 'cockpit') {
+    camera.rotation.x = -0.1;
+    cockpit.head.add(camera);
+  } else if (view === 'hood') {
+    camera.position.set(0, 1.28 - model.interior.seatDrop, -1.2);
+    camera.rotation.x = -0.07;
+    cockpit.root.add(camera);
+  } else {
+    scene.add(camera);
+    chaseCam.ready = false;
+  }
+  cockpit.root.visible = view !== 'chase';
+  exterior.group.visible = view === 'chase';
+}
+
+function cycleCamera() {
+  const st = progress.settings;
+  st.camera = CAMERA_VIEWS[(CAMERA_VIEWS.indexOf(st.camera) + 1) % CAMERA_VIEWS.length];
+  saveProgress(progress);
+  applySettings();
+  showFlash(st.camera === 'cockpit' ? 'Cockpit view' : st.camera === 'hood' ? 'Hood view' : 'Chase view', 1);
 }
 
 function resetRun() {
@@ -113,6 +166,7 @@ function resetRun() {
   const p = road.sampleAt(road.startS - 18);
   chassis.place(p.x, p.z, p.yaw);
   roadIndex = Math.round(p.s / SAMPLE_STEP);
+  roadS = p.s;
   scorer.reset();
   run = 'idle';
   runTime = 0;
@@ -127,10 +181,11 @@ resetRun();
 function resize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  renderer.setSize(w, h);
-  cockpit.camera.aspect = w / h;
-  cockpit.camera.fov = w / h < 1 ? 80 : 60;
-  cockpit.camera.updateProjectionMatrix();
+  graphics.setSize(w, h);
+  camera.aspect = w / h;
+  // The setting is for landscape screens; portrait needs a wider view to see the road.
+  camera.fov = Math.min(110, progress.settings.fov + (w / h < 1 ? 20 : 0));
+  camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);
 resize();
@@ -142,6 +197,7 @@ function showFlash(text: string, seconds = 1.6) {
 function collide() {
   const r = collideWithEdges(road, chassis, car, roadIndex);
   roadIndex = r.loc.index;
+  roadS = r.loc.s;
   return r;
 }
 
@@ -151,6 +207,7 @@ let time = 0;
 let pitch = 0;
 let grade = 0;
 let driveTime = 0;
+const shadowFocus = new THREE.Vector3();
 
 function frame(now: number) {
   requestAnimationFrame(frame);
@@ -173,7 +230,7 @@ function frame(now: number) {
     if (menus.screen === 'garage') {
       showroom.render(renderer, dt, window.innerWidth / window.innerHeight);
     } else {
-      renderer.render(scene, cockpit.camera);
+      graphics.render(camera);
     }
     return;
   }
@@ -189,6 +246,7 @@ function frame(now: number) {
     debug.classList.toggle('hidden', !debugOn);
   }
   if (c.reset) resetRun();
+  if (c.cycleCamera) cycleCamera();
   if (c.ignition) {
     if (car.running) car.stopEngine();
     else car.crank();
@@ -199,9 +257,9 @@ function frame(now: number) {
   }
 
   // Road grade along the car's heading.
-  const here = road.sampleAt(roadIndex * SAMPLE_STEP);
-  const ahead = road.sampleAt(roadIndex * SAMPLE_STEP + 2);
-  const behind = road.sampleAt(roadIndex * SAMPLE_STEP - 2);
+  const here = road.sampleAt(roadS);
+  const ahead = road.sampleAt(roadS + 2);
+  const behind = road.sampleAt(roadS - 2);
   const roadGrade = (ahead.h - behind.h) / 4;
   grade = roadGrade * Math.cos(chassis.yaw - here.yaw);
   const slope = grade / Math.sqrt(1 + grade * grade);
@@ -242,7 +300,7 @@ function frame(now: number) {
   }
 
   // Run flow: the clock starts at the start line and stops at the finish.
-  const s = roadIndex * SAMPLE_STEP;
+  const s = roadS;
   if (run === 'idle' && s >= road.startS) {
     run = 'running';
     runTime = 0;
@@ -264,6 +322,9 @@ function frame(now: number) {
   // Body roll leans away from the corner a little.
   const roll = Math.max(-0.05, Math.min(0.05, -chassis.latAccel * 0.004));
   root.rotation.set(pitch, chassis.yaw, roll, 'YXZ');
+  exterior.group.position.set(chassis.x, loc.h, chassis.z);
+  exterior.group.rotation.copy(root.rotation);
+  if (progress.settings.camera === 'chase') updateChaseCamera(dt, loc.h);
 
   cockpit.wheel.rotation.z = Math.max(-7.8, Math.min(7.8, chassis.steerAngle * 14));
   const [col, row] = shifterPose(car.gear);
@@ -278,10 +339,11 @@ function frame(now: number) {
 
   // Head: lean with acceleration and cornering, shake with vibration.
   const shake = haptics.strong * 0.004 + (car.running ? 0.0004 + (car.rpm / 7000) * 0.0006 : 0);
+  const eye = cockpit.eye;
   cockpit.head.position.set(
-    -0.37 + (Math.random() - 0.5) * shake + Math.max(-0.04, Math.min(0.04, -chassis.latAccel * 0.004)),
-    1.2 + (Math.random() - 0.5) * shake,
-    0.1 + Math.max(-0.05, Math.min(0.05, car.accel * 0.006)),
+    eye.x + (Math.random() - 0.5) * shake + Math.max(-0.04, Math.min(0.04, -chassis.latAccel * 0.004)),
+    eye.y + (Math.random() - 0.5) * shake,
+    eye.z + Math.max(-0.05, Math.min(0.05, car.accel * 0.006)),
   );
   cockpit.head.rotation.x = Math.max(-0.04, Math.min(0.04, car.accel * 0.004));
 
@@ -289,7 +351,27 @@ function frame(now: number) {
   cockpit.cluster.needsUpdate = true;
 
   updateHud(c.clutch, c.brake, c.throttle, pad, s);
-  renderer.render(scene, cockpit.camera);
+  // Shadows cover the area just ahead of the car, where you're looking.
+  shadowFocus.set(chassis.x - Math.sin(chassis.yaw) * 14, loc.h, chassis.z - Math.cos(chassis.yaw) * 14);
+  graphics.follow(shadowFocus);
+  graphics.render(camera);
+}
+
+/** A camera that trails the car, lagging a little in yaw so corners are readable. */
+function updateChaseCamera(dt: number, groundY: number) {
+  const k = chaseCam.ready ? Math.min(1, dt * 4) : 1;
+  let dy = chassis.yaw - chaseCam.yaw;
+  dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+  chaseCam.yaw += dy * k;
+  const back = new THREE.Vector3(Math.sin(chaseCam.yaw), 0, Math.cos(chaseCam.yaw)); // -forward
+  const target = new THREE.Vector3(chassis.x, groundY, chassis.z);
+  const want = target.clone().addScaledVector(back, 6.2);
+  want.y = Math.max(groundY + 2.1, road.sampleAt(Math.max(0, roadS - 6)).h + 1.6);
+  if (chaseCam.ready) chaseCam.pos.lerp(want, Math.min(1, dt * 8));
+  else chaseCam.pos.copy(want);
+  chaseCam.ready = true;
+  camera.position.copy(chaseCam.pos);
+  camera.lookAt(target.x - back.x * 2, groundY + 0.9, target.z - back.z * 2);
 }
 
 function finishRun() {
@@ -348,6 +430,18 @@ function updateHud(clutch: number, brake: number, throttle: number, pad: Gamepad
     ? `${shortPadName(pad.id)}${hasRumble ? '' : ' · no rumble in this browser'}`
     : 'No controller: press any button on it';
   hint.classList.toggle('hidden', !progress.settings.hints || driveTime > 25);
+
+  // Outside the cockpit you can't see the gauges, so show the essentials on screen.
+  const outside = progress.settings.camera !== 'cockpit';
+  miniHud.root.classList.toggle('hidden', !outside);
+  if (outside) {
+    const mph = progress.settings.units === 'mph';
+    miniHud.gear.textContent = gearLabel(car.gear);
+    miniHud.speed.textContent = `${Math.round(Math.abs(car.speed) * (mph ? 2.23694 : 3.6))} ${mph ? 'mph' : 'km/h'}`;
+    const frac = Math.min(1, car.rpm / car.spec.revLimit);
+    miniHud.rpm.style.width = `${frac * 100}%`;
+    miniHud.rpm.classList.toggle('redline', frac > 0.9);
+  }
 
   if (debugOn) {
     const speedFactor = progress.settings.units === 'mph' ? 2.23694 : 3.6;
@@ -415,4 +509,7 @@ requestAnimationFrame(frame);
   progress,
   resetRun,
   finishRun,
+  applyCar,
+  applySettings,
+  graphics,
 };

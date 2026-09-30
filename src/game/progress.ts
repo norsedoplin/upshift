@@ -6,7 +6,25 @@ export interface Settings {
   volume: number; // 0..1
   units: 'kmh' | 'mph';
   hints: boolean;
+  camera: CameraView;
+  fov: number; // degrees, horizontal screens; portrait screens add 20
+  graphics: GraphicsQuality;
 }
+
+export type GraphicsQuality = 'low' | 'medium' | 'high';
+export const GRAPHICS_QUALITIES: GraphicsQuality[] = ['low', 'medium', 'high'];
+
+/** Phones and tablets start on Medium; everything else on High. */
+export function defaultGraphics(): GraphicsQuality {
+  try {
+    return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? 'medium' : 'high';
+  } catch {
+    return 'high';
+  }
+}
+
+export type CameraView = 'cockpit' | 'hood' | 'chase';
+export const CAMERA_VIEWS: CameraView[] = ['cockpit', 'hood', 'chase'];
 
 export interface Progress {
   creds: number;
@@ -17,11 +35,12 @@ export interface Progress {
   car: string;
   paintByCar: Record<string, string>;
   settings: Settings;
+  grants: string[]; // one-time gifts already given, so each lands only once
 }
 
 const KEY = 'upshift.progress.v1';
 
-export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true };
+export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high' };
 
 export function defaultProgress(): Progress {
   return {
@@ -32,8 +51,24 @@ export function defaultProgress(): Progress {
     ownedPaints: [],
     car: 'hatch',
     paintByCar: {},
-    settings: { ...DEFAULT_SETTINGS },
+    settings: { ...DEFAULT_SETTINGS, graphics: defaultGraphics() },
+    grants: [],
   };
+}
+
+/** Creds handed out once per save. The playtest grant lets testers try every car. */
+export const GRANTS: { id: string; creds: number }[] = [{ id: 'playtest-1', creds: 6000 }];
+
+/** Give any grants this save hasn't had yet. Returns true if something was added. */
+export function applyGrants(p: Progress) {
+  let changed = false;
+  for (const g of GRANTS) {
+    if (p.grants.includes(g.id)) continue;
+    p.creds += g.creds;
+    p.grants.push(g.id);
+    changed = true;
+  }
+  return changed;
 }
 
 /** Merge whatever was stored (possibly an older, smaller shape) over the defaults. */
@@ -49,6 +84,7 @@ export function parseProgress(raw: string | null): Progress {
     p.runs = Math.max(0, num(s.runs, 0));
     p.ownedCars = Array.from(new Set(['hatch', ...strs(s.ownedCars)]));
     p.ownedPaints = strs(s.ownedPaints);
+    p.grants = strs(s.grants);
     if (typeof s.car === 'string' && p.ownedCars.includes(s.car)) p.car = s.car;
     if (s.paintByCar && typeof s.paintByCar === 'object') {
       for (const [k, v] of Object.entries(s.paintByCar)) if (typeof v === 'string') p.paintByCar[k] = v;
@@ -59,6 +95,9 @@ export function parseProgress(raw: string | null): Progress {
       volume: Math.min(1, Math.max(0, num(st.volume, DEFAULT_SETTINGS.volume))),
       units: st.units === 'mph' ? 'mph' : 'kmh',
       hints: typeof st.hints === 'boolean' ? st.hints : true,
+      camera: CAMERA_VIEWS.includes(st.camera) ? st.camera : DEFAULT_SETTINGS.camera,
+      fov: Math.round(Math.min(100, Math.max(50, num(st.fov, DEFAULT_SETTINGS.fov))) / 5) * 5,
+      graphics: GRAPHICS_QUALITIES.includes(st.graphics) ? st.graphics : p.settings.graphics,
     };
   } catch {
     // Corrupt data: start fresh rather than crash.
@@ -68,9 +107,13 @@ export function parseProgress(raw: string | null): Progress {
 
 export function loadProgress(): Progress {
   try {
-    return parseProgress(localStorage.getItem(KEY));
+    const p = parseProgress(localStorage.getItem(KEY));
+    if (applyGrants(p)) saveProgress(p);
+    return p;
   } catch {
-    return defaultProgress();
+    const p = defaultProgress();
+    applyGrants(p);
+    return p;
   }
 }
 

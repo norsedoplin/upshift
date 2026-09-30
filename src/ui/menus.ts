@@ -3,8 +3,8 @@
 
 import { CARS, PAINTS, carById, type CarModel } from '../cars';
 import type { MenuNav } from '../input';
-import type { Progress } from '../game/progress';
-import { saveProgress } from '../game/progress';
+import type { Progress, Settings } from '../game/progress';
+import { GRAPHICS_QUALITIES, saveProgress } from '../game/progress';
 import { chooseCar, choosePaint, ownsCar, ownsPaint, paintFor } from '../game/shop';
 import type { RunStats } from '../game/scoring';
 
@@ -317,8 +317,13 @@ export class Menus {
     option('Controller rumble', 0, pctLabels, nearest(st.rumble), (i) => (st.rumble = pct[i]));
     option('Volume', 1, pctLabels, nearest(st.volume), (i) => (st.volume = pct[i]));
     option('Speed units', 2, ['km/h', 'mph'], st.units === 'kmh' ? 0 : 1, (i) => (st.units = i === 0 ? 'kmh' : 'mph'));
-    option('Control hints', 3, ['On', 'Off'], st.hints ? 0 : 1, (i) => (st.hints = i === 0));
-    list.append(this.button('Back', 4, () => this.back()));
+    const views: Settings['camera'][] = ['cockpit', 'hood', 'chase'];
+    option('Camera', 3, ['Cockpit', 'Hood', 'Chase'], views.indexOf(st.camera), (i) => (st.camera = views[i]));
+    const fovs = Array.from({ length: 11 }, (_, i) => 50 + i * 5);
+    option('Field of view', 4, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
+    option('Graphics', 5, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
+    option('Control hints', 6, ['On', 'Off'], st.hints ? 0 : 1, (i) => (st.hints = i === 0));
+    list.append(this.button('Back', 7, () => this.back()));
     panel.append(list, this.controlsHint());
   }
 

@@ -2,105 +2,49 @@
 
 import * as THREE from 'three';
 import type { BodyShape } from '../cars';
-
-export function buildCarModel(body: BodyShape, paint: THREE.Color) {
-  const g = new THREE.Group();
-  const flat = (c: THREE.ColorRepresentation) => new THREE.MeshLambertMaterial({ color: c, flatShading: true });
-  const paintMat = flat(paint);
-  const glass = flat('#1c2330');
-  const dark = flat('#1a1b1f');
-  const trim = flat('#2b2d33');
-  const { length: L, width: W, height: H, cabinLength: CL, cabinHeight: CH, cabinOffset: CO, wheelRadius: R } = body;
-  const rideHeight = R * 0.55;
-
-  // Lower body: a box with its nose and tail chamfered by squashing the top vertices inwards.
-  const lower = new THREE.BoxGeometry(W, H, L, 1, 1, 1);
-  const pos = lower.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    if (y > 0) pos.setZ(i, z * 0.93);
-  }
-  lower.computeVertexNormals();
-  const lowerMesh = new THREE.Mesh(lower, paintMat);
-  lowerMesh.position.y = rideHeight + H / 2;
-  g.add(lowerMesh);
-
-  // Cabin: a tapered block (narrower roof), glass all round with a painted roof panel.
-  const cabin = new THREE.BoxGeometry(W * 0.9, CH, CL, 1, 1, 1);
-  const cp = cabin.attributes.position;
-  for (let i = 0; i < cp.count; i++) {
-    if (cp.getY(i) > 0) {
-      cp.setX(i, cp.getX(i) * 0.86);
-      // Raked windscreen at the front (-z), steeper rear window.
-      cp.setZ(i, cp.getZ(i) < 0 ? cp.getZ(i) * 0.55 : cp.getZ(i) * 0.8);
-    }
-  }
-  cabin.computeVertexNormals();
-  const cabinMesh = new THREE.Mesh(cabin, glass);
-  cabinMesh.position.set(0, rideHeight + H + CH / 2, CO);
-  g.add(cabinMesh);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(W * 0.9 * 0.86 + 0.02, 0.04, CL * 0.6), paintMat);
-  roof.position.set(0, rideHeight + H + CH + 0.02, CO + CL * 0.06);
-  g.add(roof);
-
-  // Wheels.
-  const tyre = new THREE.CylinderGeometry(R, R, 0.22, 10).rotateZ(Math.PI / 2);
-  const hub = new THREE.CylinderGeometry(R * 0.55, R * 0.55, 0.23, 6).rotateZ(Math.PI / 2);
-  const wheelbase = L * 0.62;
-  for (const zs of [-1, 1])
-    for (const xs of [-1, 1]) {
-      const t = new THREE.Mesh(tyre, dark);
-      t.position.set(xs * (W / 2 - 0.08), R, (zs * wheelbase) / 2 + L * 0.02);
-      const h = new THREE.Mesh(hub, flat('#9a9ca1'));
-      h.position.copy(t.position);
-      h.position.x += xs * 0.01;
-      g.add(t, h);
-    }
-
-  // Lights, grille and bumpers.
-  const lamp = new THREE.BoxGeometry(0.34, 0.1, 0.04);
-  for (const xs of [-1, 1]) {
-    const head = new THREE.Mesh(lamp, flat('#fff6d8'));
-    head.position.set(xs * (W / 2 - 0.3), rideHeight + H * 0.7, -L / 2 - 0.01);
-    const tail = new THREE.Mesh(lamp, flat('#d8322b'));
-    tail.position.set(xs * (W / 2 - 0.3), rideHeight + H * 0.72, L / 2 + 0.01);
-    g.add(head, tail);
-  }
-  const grille = new THREE.Mesh(new THREE.BoxGeometry(W * 0.4, 0.12, 0.04), trim);
-  grille.position.set(0, rideHeight + H * 0.45, -L / 2 - 0.01);
-  g.add(grille);
-  for (const zs of [-1, 1]) {
-    const bumper = new THREE.Mesh(new THREE.BoxGeometry(W * 1.01, 0.14, 0.12), trim);
-    bumper.position.set(0, rideHeight + 0.1, (zs * L) / 2);
-    g.add(bumper);
-  }
-  return { group: g, paintMat };
-}
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { buildCarModel } from './carModel';
 
 export class Showroom {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
   private holder = new THREE.Group();
-  private paintMat: THREE.MeshLambertMaterial | null = null;
+  private paintMat: THREE.MeshStandardMaterial | null = null;
   private angle = 0.6;
 
   constructor() {
     this.scene.background = new THREE.Color('#1d1f24');
     this.scene.fog = new THREE.Fog('#1d1f24', 12, 26);
-    this.scene.add(new THREE.HemisphereLight('#dfe8f5', '#3a3024', 1.4));
-    const key = new THREE.DirectionalLight('#fff3e0', 2.4);
+    this.scene.environmentIntensity = 0.55;
+    this.scene.add(new THREE.HemisphereLight('#dfe8f5', '#3a3024', 0.5));
+    const key = new THREE.DirectionalLight('#fff3e0', 2.6);
     key.position.set(4, 7, 3);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.bias = -0.0005;
+    key.shadow.normalBias = 0.02;
+    const sc = key.shadow.camera;
+    sc.left = sc.bottom = -4;
+    sc.right = sc.top = 4;
+    sc.near = 1;
+    sc.far = 20;
     this.scene.add(key);
-    const rim = new THREE.DirectionalLight('#8fb6ff', 1.2);
+    const rim = new THREE.DirectionalLight('#8fb6ff', 1.6);
     rim.position.set(-5, 3, -4);
     this.scene.add(rim);
     const floor = new THREE.Mesh(
-      new THREE.CylinderGeometry(3.4, 3.6, 0.12, 24),
-      new THREE.MeshLambertMaterial({ color: '#2b2d33', flatShading: true }),
+      new THREE.CylinderGeometry(3.4, 3.6, 0.12, 48),
+      new THREE.MeshStandardMaterial({ color: '#2b2d33', roughness: 0.3, metalness: 0.2 }),
     );
     floor.position.y = -0.06;
-    this.scene.add(floor, this.holder);
+    floor.receiveShadow = true;
+    // A thin lit ring round the turntable's edge.
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(3.42, 0.02, 4, 64).rotateX(Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: '#ff7a3d', emissive: '#ff7a3d', emissiveIntensity: 1.2 }),
+    );
+    ring.position.y = 0.0;
+    this.scene.add(floor, ring, this.holder);
   }
 
   show(body: BodyShape, paint: string) {
@@ -115,6 +59,12 @@ export class Showroom {
   }
 
   render(renderer: THREE.WebGLRenderer, dt: number, aspect: number) {
+    // Soft studio reflections for the paint, baked once.
+    if (!this.scene.environment) {
+      const pm = new THREE.PMREMGenerator(renderer);
+      this.scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+      pm.dispose();
+    }
     this.angle += dt * 0.35;
     this.holder.rotation.y = this.angle;
     // On wide screens the menu sits on the left, so aim left of the car to push it right.
