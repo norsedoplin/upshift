@@ -19,6 +19,7 @@ import { ComicFx } from './ui/comicFx';
 import { Scorer, cashoutFor, credsForRun, tierFor, ScoreEvent } from './game/scoring';
 import { CAMERA_VIEWS, loadProgress, saveProgress } from './game/progress';
 import { paintFor } from './game/shop';
+import { specFor, tuneFor } from './game/tuning';
 import { carById, forwardGears } from './cars';
 import { Menus } from './ui/menus';
 import { Showroom } from './ui/showroom';
@@ -45,8 +46,10 @@ function updateDay(dt: number) {
     scene.environment = envTarget.texture;
   }
   graphics.setSunDir(day.dir);
-  renderer.toneMappingExposure = 1.05 + day.sky.dark * 0.35;
-  headlights.intensity = day.sky.dark * 900;
+  // Nights are properly dark: the exposure doesn't lift them, so the headlights do the work.
+  renderer.toneMappingExposure = 1.05 + day.sky.dark * 0.1;
+  headlights.intensity = day.sky.dark * 700;
+  highBeam.intensity = day.sky.dark * 1100;
 }
 const showroom = new Showroom();
 
@@ -59,15 +62,22 @@ scene.add(exterior.group);
 // Headlights: one wide beam from the nose, only switched on after dark.
 const headlights = new THREE.SpotLight('#fff1d8', 0, 0, 0.62, 0.55, 1.6);
 const headlightAim = new THREE.Object3D();
+// A narrower, longer beam on top, like high beams on an empty mountain road.
+const highBeam = new THREE.SpotLight('#fff6e6', 0, 0, 0.3, 0.45, 1.25);
+const highAim = new THREE.Object3D();
+highBeam.position.set(0, 0.8, -2.1);
+highAim.position.set(0, -0.2, -60);
+highBeam.target = highAim;
 headlights.position.set(0, 0.75, -2.1);
 headlightAim.position.set(0, -0.6, -22);
 headlights.target = headlightAim;
 const lightRig = new THREE.Group();
-lightRig.add(headlights, headlightAim);
+lightRig.add(headlights, headlightAim, highBeam, highAim);
 scene.add(lightRig);
 const camera = new THREE.PerspectiveCamera(60, 1, 0.03, 3000);
 const chaseCam = { pos: new THREE.Vector3(), yaw: 0, ready: false };
-let car = new Car(model.spec);
+let car = new Car(specFor(progress, model));
+let tuneKey = JSON.stringify(tuneFor(progress, model.id));
 let chassis = new Chassis(model.chassis);
 let gearSequence = [-1, 0, ...forwardGears(model.spec)];
 const input = new Input();
@@ -85,7 +95,7 @@ const debug = $('debug');
 const debugText = $('debug-text');
 const biteCanvas = $('bite') as HTMLCanvasElement;
 const padStatus = $('pad-status');
-const pedals = { clutch: $('bar-clutch'), brake: $('bar-brake'), throttle: $('bar-throttle') };
+const pedals = { clutch: $('bar-clutch'), brake: $('bar-brake'), throttle: $('bar-throttle'), boost: $('bar-boost'), boostWrap: $('pedal-boost') };
 const hint = $('hint');
 const speedo = $('speedo') as HTMLCanvasElement;
 const hud = {
@@ -108,6 +118,8 @@ const tierBanner = $('tier-banner');
 const edgeFlash = $('edge-flash');
 /** 0..1 kick after a good shift or a new tier: widens the view and fires the speed lines. */
 let punch = 0;
+/** 0..1.2 smoothed forward acceleration, for the push-back feel. */
+let pull = 0;
 /** 0..1 how fast the car is going, for the speed effects. */
 let speed01 = 0;
 const carScreen = { x: 0, y: 0, scale: 1 };
@@ -205,12 +217,12 @@ document.addEventListener('pointerlockchange', () => {
 // Garage camera: drag anywhere outside the menu panel to turn and tilt, scroll to zoom.
 {
   let drag: { x: number; y: number } | null = null;
-  const inGarage = (e: Event) => menus.screen === 'garage' && !(e.target as HTMLElement | null)?.closest?.('.menu-panel');
+  const inGarage = (e: Event) => (menus.screen === 'garage' || menus.screen === 'tune') && !(e.target as HTMLElement | null)?.closest?.('.menu-panel');
   window.addEventListener('pointerdown', (e) => {
     if (inGarage(e)) drag = { x: e.clientX, y: e.clientY };
   });
   window.addEventListener('pointermove', (e) => {
-    if (!drag || menus.screen !== 'garage') return;
+    if (!drag || (menus.screen !== 'garage' && menus.screen !== 'tune')) return;
     showroom.orbit((e.clientX - drag.x) * 0.008, (e.clientY - drag.y) * 0.005);
     drag = { x: e.clientX, y: e.clientY };
   });
@@ -237,12 +249,23 @@ function applyCar() {
     exterior = buildCarModel(model.body, new THREE.Color(paint));
     scene.add(cockpit.root, exterior.group);
     attachCamera();
-    car = new Car(model.spec);
+    car = new Car(specFor(progress, model));
+    tuneKey = JSON.stringify(tuneFor(progress, model.id));
     chassis = new Chassis(model.chassis);
     gearSequence = [-1, 0, ...forwardGears(model.spec)];
     audio.setEngine(model.cylinders);
     resetRun();
   }
+  // New parts fitted: rebuild the drivetrain with them.
+  const key = JSON.stringify(tuneFor(progress, model.id));
+  if (key !== tuneKey) {
+    tuneKey = key;
+    car = new Car(specFor(progress, model));
+    resetRun();
+  }
+  audio.exhaust = tuneFor(progress, model.id).exhaust ?? 0;
+  const tb = car.spec.turbo;
+  pedals.boostWrap.classList.toggle('hidden', !tb);
   cockpit.paint.color.set(paint);
   exterior.paintMat.color.set(paint);
 }
@@ -332,6 +355,7 @@ function resetRun() {
 cockpit.paint.color.set(paintFor(progress, model.id).color);
 audio.setEngine(model.cylinders);
 applySettings();
+applyCar();
 resetRun();
 
 function resize() {
@@ -391,7 +415,7 @@ function frame(now: number) {
     menus.update(nav);
     simAccumulator = 0;
     haptics.update(dt, car, null);
-    if (menus.screen === 'garage') {
+    if (menus.screen === 'garage' || menus.screen === 'tune') {
       showroom.control(pad, dt);
       showroom.render(renderer, dt, window.innerWidth / window.innerHeight);
     } else {
@@ -469,6 +493,9 @@ function frame(now: number) {
       showFlash('Clutch in to change gear');
     } else if (e.type === 'lock') {
       haptics.lock(e.slip);
+    } else if (e.type === 'blowoff') {
+      audio.blowoff(e.boost);
+      haptics.jolt(0.12 * e.boost);
     }
   }
 
@@ -528,15 +555,26 @@ function frame(now: number) {
   cockpit.head.position.set(
     eye.x + (Math.random() - 0.5) * shake + Math.max(-0.04, Math.min(0.04, -chassis.latAccel * 0.004)),
     eye.y + (Math.random() - 0.5) * shake,
-    eye.z + Math.max(-0.05, Math.min(0.05, car.accel * 0.006)),
+    eye.z + Math.max(-0.05, Math.min(0.09, car.accel * 0.011)),
   );
-  cockpit.head.rotation.x = Math.max(-0.04, Math.min(0.04, car.accel * 0.004));
+  cockpit.head.rotation.x = Math.max(-0.05, Math.min(0.06, car.accel * 0.007));
+
+  // Pull: how hard the car is shoving you into the seat. It widens the view, and when the
+  // turbo is on boost the whole car shudders with it.
+  pull += (Math.min(1.2, Math.max(0, car.accel / 5.5)) - pull) * Math.min(1, dt * 4);
+  const tbo = car.spec.turbo;
+  const onBoost = tbo ? (car.boost / tbo.maxBoost) * car.throttleEff : 0;
+  if (onBoost > 0.05) {
+    const judder = onBoost * (0.0016 * Math.sin(time * 2 * Math.PI * 11) + (Math.random() - 0.5) * 0.0022);
+    cockpit.head.position.y += judder;
+    cockpit.head.position.x += judder * 0.5;
+  }
 
   // Speed effects: the view widens and shivers a touch as the speed builds.
   const fast = progress.settings.speedFx ? Math.max(0, Math.abs(car.speed) - 8) / 30 : 0;
   speed01 += (Math.min(1, Math.max(0, (Math.abs(car.speed) - 12) / 30)) - speed01) * Math.min(1, dt * 3);
   punch = Math.max(0, punch - dt * 1.8);
-  const wantFov = progress.settings.speedFx ? Math.min(1, fast) * 14 + punch * 7 : 0;
+  const wantFov = progress.settings.speedFx ? Math.min(1, fast) * 12 + pull * 8 + punch * 5 : 0;
   speedFov += (wantFov - speedFov) * Math.min(1, dt * (wantFov > speedFov ? 8 : 2.5));
   if (Math.abs(camera.fov - (baseFov + speedFov)) > 0.01) {
     camera.fov = baseFov + speedFov;
@@ -556,11 +594,12 @@ function frame(now: number) {
   shadowFocus.set(chassis.x - Math.sin(chassis.yaw) * 14, loc.h, chassis.z - Math.cos(chassis.yaw) * 14);
   graphics.follow(shadowFocus);
   updateTreeDetail(scenery.trees, shadowFocus);
-  graphics.setMotion(speed01, punch);
+  const lvl = progress.settings.fxLevel;
+  graphics.setMotion(Math.min(1, speed01 + pull * 0.3) * lvl, punch * lvl);
   graphics.render(camera);
   placeCarOnScreen();
   // The speed wings stream off the car body, so only from outside it.
-  comic.update(dt, carScreen, progress.settings.speedFx ? speed01 : 0, progress.settings.retro === 'street' && progress.settings.camera === 'chase');
+  comic.update(dt, carScreen, progress.settings.speedFx ? speed01 * (0.4 + 0.6 * progress.settings.fxLevel) : 0, progress.settings.retro === 'street' && progress.settings.camera === 'chase');
 }
 
 const screenPos = new THREE.Vector3();
@@ -671,8 +710,9 @@ function updateChaseCamera(dt: number, groundY: number) {
   const back = new THREE.Vector3(Math.sin(chaseCam.yaw), 0, Math.cos(chaseCam.yaw)); // -forward
   const target = new THREE.Vector3(chassis.x, groundY, chassis.z);
   // At speed the camera drops back and down a little, so the road rushes by.
-  const want = target.clone().addScaledVector(back, 6.2 + speed01 * 1.4);
-  want.y = Math.max(groundY + 2.1 - speed01 * 0.35, road.sampleAt(Math.max(0, roadS - 6)).h + 1.6);
+  const st = progress.settings;
+  const want = target.clone().addScaledVector(back, st.chaseDist + speed01 * 1.1);
+  want.y = Math.max(groundY + st.chaseHeight - speed01 * 0.3, road.sampleAt(Math.max(0, roadS - 6)).h + 1.6);
   if (chaseCam.ready) chaseCam.pos.lerp(want, Math.min(1, dt * 8));
   else chaseCam.pos.copy(want);
   chaseCam.ready = true;
@@ -790,6 +830,7 @@ function updateHud(clutch: number, brake: number, throttle: number, pad: Gamepad
   pedals.clutch.style.height = `${clutch * 100}%`;
   pedals.brake.style.height = `${brake * 100}%`;
   pedals.throttle.style.height = `${throttle * 100}%`;
+  if (car.spec.turbo) pedals.boost.style.height = `${(car.boost / car.spec.turbo.maxBoost) * 100}%`;
   const inBite = car.clutchCapacity > 0 && car.clutchCapacity < car.spec.clutchMaxTorque * 0.95;
   pedals.clutch.classList.toggle('bite', inBite);
 

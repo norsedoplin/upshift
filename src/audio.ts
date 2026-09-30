@@ -23,6 +23,12 @@ export class EngineAudio {
   private clutchFilter!: BiquadFilterNode;
   private squealFilter!: BiquadFilterNode;
   private squealGain!: GainNode;
+  private whistleOsc!: OscillatorNode;
+  private whistleGain!: GainNode;
+  private spoolFilter!: BiquadFilterNode;
+  private spoolGain!: GainNode;
+  /** Louder with an aftermarket exhaust: 0 stock, 1 sport, 2 straight pipe. */
+  exhaust = 0;
   volume = 0.8;
   private muted = false;
   private cylinders: EngineSound = 4;
@@ -110,6 +116,21 @@ export class EngineAudio {
     this.starterGain.gain.value = 0;
     this.starterOsc.connect(starterFilter).connect(this.starterGain).connect(this.master);
 
+    // Turbo: a whistle that rises with shaft speed and a breathy rush of air under it.
+    this.whistleOsc = ctx.createOscillator();
+    this.whistleOsc.type = 'sine';
+    this.whistleOsc.frequency.value = 2000;
+    this.whistleGain = ctx.createGain();
+    this.whistleGain.gain.value = 0;
+    this.whistleOsc.connect(this.whistleGain).connect(this.master);
+    this.spoolFilter = ctx.createBiquadFilter();
+    this.spoolFilter.type = 'bandpass';
+    this.spoolFilter.Q.value = 4;
+    this.spoolGain = ctx.createGain();
+    this.spoolGain.gain.value = 0;
+    noise.connect(this.spoolFilter).connect(this.spoolGain).connect(this.master);
+    this.whistleOsc.start();
+
     this.engineOsc.start();
     this.engineOsc2.start();
     this.starterOsc.start();
@@ -139,7 +160,8 @@ export class EngineAudio {
 
     const spinning = Math.min(1, rpm / 300);
     const load = car.load;
-    const level = car.running ? 0.22 + 0.4 * load + (rpm / 7000) * 0.2 : car.cranking ? 0.12 * spinning : 0.1 * spinning;
+    const loud = 1 + this.exhaust * 0.18;
+    const level = (car.running ? 0.22 + 0.4 * load + (rpm / 7000) * 0.2 : car.cranking ? 0.12 * spinning : 0.1 * spinning) * loud;
     this.engineGain.gain.setTargetAtTime(level, t, car.running ? tc : 0.08);
     this.engineFilter.frequency.setTargetAtTime(180 + rpm * 0.28 + load * 1400, t, tc);
 
@@ -148,6 +170,13 @@ export class EngineAudio {
 
     this.starterGain.gain.setTargetAtTime(car.cranking ? 0.06 : 0, t, 0.02);
     this.starterOsc.frequency.setTargetAtTime(150 + rpm * 0.6, t, 0.05);
+
+    const tb = car.spec.turbo;
+    const b = tb ? car.boost / tb.maxBoost : 0;
+    this.whistleOsc.frequency.setTargetAtTime(1600 + b * 5200 + rpm * 0.15, t, 0.06);
+    this.whistleGain.gain.setTargetAtTime(tb ? b * b * (0.012 + 0.03 * car.throttleEff) : 0, t, 0.05);
+    this.spoolFilter.frequency.setTargetAtTime(900 + b * 3200, t, 0.06);
+    this.spoolGain.gain.setTargetAtTime(tb ? b * 0.06 * car.throttleEff : 0, t, 0.05);
 
     const v = Math.abs(car.speed);
     this.windFilter.frequency.setTargetAtTime(200 + v * 25, t, 0.1);
@@ -227,6 +256,26 @@ export class EngineAudio {
       n.stop(t0 + 0.75);
     }
     setTimeout(() => out.disconnect(), 1500);
+  }
+
+  /** The blow-off valve venting: a sharp "pssh" that trails off. */
+  blowoff(strength: number) {
+    const ctx = this.ctx;
+    if (!ctx || this.muted) return;
+    const t0 = ctx.currentTime;
+    const n = makeNoise(ctx);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 1.4;
+    f.frequency.setValueAtTime(4200, t0);
+    f.frequency.exponentialRampToValueAtTime(1300, t0 + 0.4);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(0.32 * strength, t0 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.45);
+    n.connect(f).connect(g).connect(this.master);
+    n.start(t0);
+    n.stop(t0 + 0.5);
   }
 
   setMuted(m: boolean) {

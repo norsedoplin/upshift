@@ -689,10 +689,11 @@ function buildDelineators(road: Road, terrain: Terrain) {
 function pineGeometry() {
   // Four drooping tiers with a ragged edge, so the silhouette reads as a conifer, not a stack of cones.
   const tiers = [
-    [1.75, 1.9, -1.35],
-    [1.45, 1.8, -0.35],
-    [1.1, 1.65, 0.6],
-    [0.7, 1.5, 1.5],
+    [1.8, 1.8, -1.6],
+    [1.55, 1.7, -0.75],
+    [1.28, 1.6, 0.05],
+    [0.98, 1.5, 0.8],
+    [0.62, 1.4, 1.5],
   ].map(([r, h, y], t) => {
     const cone = new THREE.ConeGeometry(r, h, 10, 1).toNonIndexed();
     const p = cone.attributes.position;
@@ -760,6 +761,9 @@ function buildTrees(road: Road, terrain: Terrain, b: Bounds) {
   const c = new THREE.Color();
   const PINE = [new THREE.Color('#3f7043'), new THREE.Color('#557f45'), new THREE.Color('#35603f'), new THREE.Color('#2e5538')];
   const LEAF = [new THREE.Color('#6f9d4b'), new THREE.Color('#86a84c'), new THREE.Color('#5d8c45'), new THREE.Color('#a3a549')];
+  const BUSH = [new THREE.Color('#2f5a33'), new THREE.Color('#3d6a38'), new THREE.Color('#4a7a3c'), new THREE.Color('#2a4d30')];
+  const bushGeo = new THREE.IcosahedronGeometry(1, 1);
+  const bushMat = new THREE.MeshStandardMaterial({ color: '#ffffff', flatShading: true, roughness: 1 });
   const pick = (list: THREE.Color[], h: number, h2: number) => c.copy(list[Math.floor(h * list.length)]).lerp(list[Math.floor(h2 * list.length)], 0.5);
   const clear = (x: number, z: number, margin: number) => {
     const near = terrain.nearest(x, z);
@@ -768,29 +772,38 @@ function buildTrees(road: Road, terrain: Terrain, b: Bounds) {
 
   // A proper touge forest: a wall of trees along both sides of the whole road, a few rows
   // deep, so you drive down a corridor and only see out at the lots and the odd clearing.
-  const spots: { x: number; z: number; big: boolean }[] = [];
+  const spots: { x: number; z: number; big: boolean; tall: number; bush?: boolean }[] = [];
   for (let i = 0; i < road.samples.length; i += 2) {
     const a = road.samples[i];
     for (const side of [-1, 1]) {
       // Clearings: now and then the forest opens up for a view.
       if (valueNoise(a.s / 140 + (side > 0 ? 40 : 0), 3.3) < 0.2) continue;
-      for (let row = 0; row < 11; row++) {
+      for (let row = 0; row < 13; row++) {
         const hh = hash(i * 13 + row, side + 90);
-        if (hh < 0.18) continue;
+        if (hh < 0.14) continue;
         const along = (hash(i, row + side * 31) - 0.5) * 3.6;
         const p = road.sampleAt(a.s + along);
-        const off = road.wallOffset + 2 + row * 4 + hash(i + row, side + 91) * 3;
+        const off = road.wallOffset + 1.6 + row * 3.4 + hash(i + row, side + 91) * 2.6;
         const [x, , z] = at(p, side * off, 0);
-        if (clear(x, z, 1.8)) spots.push({ x, z, big: row > 2 });
+        // Tall cedars crowd the road, so the forest closes over you like a tunnel.
+        if (clear(x, z, 1.4)) spots.push({ x, z, big: row > 1, tall: 1.5 + hash(i + row, side + 92) * 0.9 });
+      }
+      // Undergrowth between the trunks, so you can't see out between them either.
+      for (let k = 0; k < 3; k++) {
+        if (hash(i * 7 + k, side + 95) < 0.3) continue;
+        const p = road.sampleAt(a.s + (hash(i, k + side * 17) - 0.5) * 4);
+        const off = road.wallOffset + 1.4 + k * 2.6 + hash(i + k, side + 96) * 2;
+        const [x, , z] = at(p, side * off, 0);
+        if (clear(x, z, 1.2)) spots.push({ x, z, big: false, tall: 1, bush: true });
       }
     }
   }
   // Forest across the rest of the mountainside, in clumps.
-  for (let i = 0; i < 24000 && spots.length < 34000; i++) {
+  for (let i = 0; i < 24000 && spots.length < 42000; i++) {
     const x = b.minX + hash(i, 2) * (b.maxX - b.minX);
     const z = b.minZ + hash(i, 3) * (b.maxZ - b.minZ);
     if (valueNoise(x / 90, z / 90) < 0.36) continue;
-    if (clear(x, z, 2.5)) spots.push({ x, z, big: true });
+    if (clear(x, z, 2.5)) spots.push({ x, z, big: true, tall: 1.1 + hash(i, 8) * 0.6 });
   }
 
   // Split into tiles so each tile can be culled on its own, which keeps this many trees
@@ -811,24 +824,39 @@ function buildTrees(road: Road, terrain: Terrain, b: Bounds) {
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, list.length);
     const pines = new THREE.InstancedMesh(crownGeo, pineMat, list.length);
     const rounds = new THREE.InstancedMesh(roundGeo, leafMat, list.length);
+    const bushes = new THREE.InstancedMesh(bushGeo, bushMat, list.length);
     let cx = 0;
     let cz = 0;
     let t = 0;
     let p = 0;
     let r = 0;
+    let bu = 0;
     for (const i of list) {
-      const { x, z, big } = spots[i];
+      const { x, z, big, tall, bush } = spots[i];
       cx += x / list.length;
       cz += z / list.length;
       const y = terrain.height(x, z);
+      if (bush) {
+        const bs = 0.9 + hash(i, 4) * 1.1;
+        q.setFromAxisAngle(up, hash(i, 5) * 6.28);
+        m.compose(pos.set(x, y + 0.35 * bs, z), q, scl.set(bs * 1.3, bs * (0.7 + hash(i, 7) * 0.5), bs * 1.3));
+        bushes.setColorAt(bu, pick(BUSH, hash(i, 13), hash(i, 14)));
+        bushes.setMatrixAt(bu++, m);
+        continue;
+      }
       const sc = (big ? 0.95 : 0.75) + hash(i, 4) * (big ? 0.85 : 0.6);
       q.setFromAxisAngle(up, hash(i, 5) * 6.28);
-      scl.set(sc, sc * (0.9 + hash(i, 7) * 0.35), sc);
-      m.compose(pos.set(x, y + 0.8 * sc, z), q, scl);
+      const pine = hash(i, 6) > (big ? 0.3 : 0.15);
+      // Pines grow tall and straight, on a long bare trunk; broadleaf trees stay rounder.
+      const hs = pine ? tall * (0.9 + hash(i, 7) * 0.3) : 0.9 + hash(i, 7) * 0.35;
+      const trunkY = pine ? hs * 1.5 : 1;
+      scl.set(sc, sc * trunkY, sc);
+      m.compose(pos.set(x, y + 0.8 * sc * trunkY, z), q, scl);
       trunks.setMatrixAt(t++, m);
+      scl.set(sc, sc * hs, sc);
       // Mostly pines close in, like a cedar forest; more broadleaf further out.
-      if (hash(i, 6) > (big ? 0.3 : 0.15)) {
-        m.compose(pos.set(x, y + 3.4 * sc, z), q, scl);
+      if (pine) {
+        m.compose(pos.set(x, y + (1.6 * trunkY - 0.5 + 2.4 * hs) * sc, z), q, scl);
         pines.setColorAt(p, pick(PINE, hash(i, 13), hash(i, 14)));
         pines.setMatrixAt(p++, m);
       } else {
@@ -840,6 +868,7 @@ function buildTrees(road: Road, terrain: Terrain, b: Bounds) {
     trunks.count = t;
     pines.count = p;
     rounds.count = r;
+    bushes.count = bu;
     // The far set shares the near set's instance data.
     const pinesFar = new THREE.InstancedMesh(crownFar, pineMat, list.length);
     const roundsFar = new THREE.InstancedMesh(roundFar, leafMat, list.length);
@@ -857,6 +886,7 @@ function buildTrees(road: Road, terrain: Terrain, b: Bounds) {
       [trunks, group],
       [pines, near],
       [rounds, near],
+      [bushes, near],
       [pinesFar, farG],
       [roundsFar, farG],
     ] as const) {

@@ -21,6 +21,20 @@ export interface CarSpec {
   biteStart: number; // engagement (0 = pedal down, 1 = released) where the clutch starts to grab
   biteEnd: number; // engagement where it reaches full clamp force
   starterTorque: number;
+  turbo?: TurboSpec;
+}
+
+/**
+ * A turbo. Torque scales from `lo` (no boost) to `hi` (full boost) times the curve, and boost
+ * only builds once there's exhaust flow: slowly around `spoolRpm`, quickly above it. So the
+ * car pulls softly, then comes alive as the turbo spools, then keeps pulling.
+ */
+export interface TurboSpec {
+  maxBoost: number; // bar, for the gauge
+  lo: number;
+  hi: number;
+  spoolRpm: number; // rpm where it can make full boost
+  lag: number; // s, spool-up time constant at spoolRpm
 }
 
 export const HATCHBACK: CarSpec = {
@@ -67,7 +81,8 @@ export type CarEvent =
   | { type: 'grind' }
   | { type: 'shift'; gear: number }
   | { type: 'lock'; slip: number } // clutch locked up; slip in rad/s just before
-  | { type: 'wall'; impact: number }; // hit the road edge; impact speed in m/s
+  | { type: 'wall'; impact: number } // hit the road edge; impact speed in m/s
+  | { type: 'blowoff'; boost: number }; // lifted off with boost up: the valve vents it
 
 export class Car {
   spec: CarSpec;
@@ -88,6 +103,8 @@ export class Car {
   driveForce = 0; // N pushed through the driven wheels (negative = engine braking)
   brakeForceNow = 0; // N of service brake currently applied
   cranking = false;
+  /** Turbo boost, bar (0 without a turbo). */
+  boost = 0;
 
   private crankTime = 0;
   private startGrace = 0;
@@ -96,11 +113,12 @@ export class Car {
   private fuelCut = false;
   private throttleLag = 0;
   private events: CarEvent[] = [];
+  private ventedAt = false;
   private peakTorque: number;
 
   constructor(spec: CarSpec = HATCHBACK) {
     this.spec = spec;
-    this.peakTorque = Math.max(...spec.torqueCurve.map(([, t]) => t));
+    this.peakTorque = Math.max(...spec.torqueCurve.map(([, t]) => t)) * (spec.turbo ? spec.turbo.hi : 1);
   }
 
   get rpm() {
@@ -178,6 +196,7 @@ export class Car {
     this.outputOmega = 0;
     this.speed = 0;
     this.accel = 0;
+    this.boost = 0;
     this.running = false;
     this.locked = false;
     this.starterRequest = 0;
@@ -225,7 +244,25 @@ export class Car {
     else if (rpm < s.revLimit - 250) this.fuelCut = false;
 
     this.throttleEff = this.running && !this.fuelCut ? throttle : 0;
-    this.combustionTorque = this.curveTorque(rpm) * this.throttleEff;
+    let boostScale = 1;
+    const tb = s.turbo;
+    if (tb) {
+      // Exhaust flow drives the turbine: little below about half the spool rpm, plenty above it.
+      const flow = Math.min(1.3, Math.max(0, (rpm - tb.spoolRpm * 0.45) / (tb.spoolRpm * 0.55))) * (0.2 + 0.8 * this.throttleEff);
+      const target = tb.maxBoost * Math.min(1, flow) * (this.throttleEff > 0.15 ? 1 : 0);
+      const before = this.boost;
+      if (target > this.boost) this.boost += (target - this.boost) * Math.min(1, (dt / tb.lag) * (0.15 + 0.85 * flow * flow));
+      else this.boost += (target - this.boost) * Math.min(1, dt / 0.15);
+      // Snapping the throttle shut with boost up opens the blow-off valve.
+      if (this.throttleLag < 0.15 && inp.throttle < 0.1 && before > tb.maxBoost * 0.45 && !this.ventedAt) {
+        this.ventedAt = true;
+        this.events.push({ type: 'blowoff', boost: before / tb.maxBoost });
+      }
+      if (this.throttleLag > 0.4) this.ventedAt = false;
+      const b = this.boost / tb.maxBoost;
+      boostScale = tb.lo + (tb.hi - tb.lo) * b;
+    }
+    this.combustionTorque = this.curveTorque(rpm) * this.throttleEff * boostScale;
 
     let starter = 0;
     this.cranking = false;

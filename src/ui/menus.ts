@@ -15,17 +15,18 @@ import {
   type PadInput,
 } from '../bindings';
 import type { Progress, Settings } from '../game/progress';
-import { GRAPHICS_QUALITIES, MOUSE_TRAVELS, RETRO_LOOKS, SPEEDO_MODES, TIMES_OF_DAY, saveProgress } from '../game/progress';
+import { CHASE_DISTS, CHASE_HEIGHTS, GRAPHICS_QUALITIES, MOUSE_TRAVELS, RETRO_LOOKS, SPEEDO_MODES, TIMES_OF_DAY, saveProgress } from '../game/progress';
+import { PARTS, clutchWillSlip, fitPart, ownedLevel, peakPower, peakTorque, specFor, tuneFor, tunedSpec, type Tune } from '../game/tuning';
 import { MAPS, mapById, mapStats, outlinePath, roadFor } from '../track/maps';
 import { chooseCar, choosePaint, ownsCar, ownsPaint, paintFor } from '../game/shop';
 import type { RunStats } from '../game/scoring';
 
 const SETTINGS_TABS = ['Controller', 'View', 'Game'] as const;
 
-export type Screen = 'title' | 'main' | 'garage' | 'settings' | 'controls' | 'pause' | 'summary' | 'help' | 'maps';
+export type Screen = 'title' | 'main' | 'garage' | 'settings' | 'controls' | 'pause' | 'summary' | 'help' | 'maps' | 'tune';
 
 /** Screens with the navigation bar across the top. */
-const NAV_SCREENS: Screen[] = ['main', 'garage', 'settings', 'controls', 'help', 'maps'];
+const NAV_SCREENS: Screen[] = ['main', 'garage', 'settings', 'controls', 'help', 'maps', 'tune'];
 const TIME_LABELS = ['Day cycle', 'Morning', 'Noon', 'Sunset', 'Night'];
 
 interface Item {
@@ -77,6 +78,8 @@ export class Menus {
   private capturing: { action: Action; kind: 'pad' | 'key' } | null = null;
   // Swallow input for one frame after a screen change, so one press can't act twice.
   private settle = false;
+  /** Tuning levels being looked at (not bought or fitted yet), per part. */
+  private tunePreview: Tune = {};
   // Where the mouse last really was. Redrawing a screen puts new rows under a resting
   // pointer and the browser fires hover events for them; those mustn't steal focus.
   private mouseAt = { x: NaN, y: NaN };
@@ -115,14 +118,16 @@ export class Menus {
   }
 
   open(screen: Screen | null) {
-    if (screen === 'garage' && this.screen && this.screen !== 'garage' && this.screen !== 'settings') this.garageReturn = this.screen;
+    if (screen === 'garage' && this.screen && this.screen !== 'garage' && this.screen !== 'settings' && this.screen !== 'tune') this.garageReturn = this.screen;
+    if (screen === 'tune') this.tunePreview = {};
     if (screen === 'settings' && this.screen && this.screen !== 'settings' && this.screen !== 'controls') this.settingsReturn = this.screen;
     if (screen === 'controls' && this.screen && this.screen !== 'controls') this.controlsReturn = this.screen;
     if (this.capturing) {
       this.capturing = null;
       this.hooks.cancelCapture();
     }
-    if ((this.screen === 'garage' || this.screen === 'main') && screen !== this.screen) this.hooks.preview(null, null);
+    const showsCar = (x: Screen | null) => x === 'garage' || x === 'tune';
+    if ((this.screen === 'main' || showsCar(this.screen)) && screen !== this.screen && !(showsCar(this.screen) && showsCar(screen))) this.hooks.preview(null, null);
     this.screen = screen;
     this.status = '';
     this.settle = true;
@@ -199,6 +204,9 @@ export class Menus {
         break;
       case 'maps':
         this.open('main');
+        break;
+      case 'tune':
+        this.open('garage');
         break;
       default:
         break;
@@ -300,6 +308,9 @@ export class Menus {
       case 'maps':
         this.renderMaps(panel);
         break;
+      case 'tune':
+        this.renderTune(panel);
+        break;
     }
     // The bar's items go in last so each screen's own items keep their indices.
     if (NAV_SCREENS.includes(this.screen)) this.root.prepend(this.navBar());
@@ -330,7 +341,7 @@ export class Menus {
       ['Garage', 'garage'],
       ['Settings', 'settings'],
     ];
-    const active = this.screen === 'controls' ? 'settings' : this.screen === 'help' || this.screen === 'maps' ? 'main' : this.screen;
+    const active = this.screen === 'controls' ? 'settings' : this.screen === 'help' || this.screen === 'maps' ? 'main' : this.screen === 'tune' ? 'garage' : this.screen;
     sections.forEach(([label, screen], i) => {
       const t = h('div', `menu-btn nav-tab${screen === active ? ' active' : ''}`, label);
       this.add(t, -1, i, { confirm: () => screen !== this.screen && this.open(screen) });
@@ -619,7 +630,12 @@ export class Menus {
       const fovs = Array.from({ length: 11 }, (_, i) => 50 + i * 5);
       option('Field of view', row++, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
       option('On-screen speedo', row++, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
-      option('Speed effects', row++, ['On', 'Off'], st.speedFx ? 0 : 1, (i) => (st.speedFx = i === 0));
+      option('Speed effects', row++, ['Off', 'Subtle', 'Strong'], st.speedFx ? (st.fxLevel === 1 ? 2 : 1) : 0, (i) => {
+        st.speedFx = i > 0;
+        if (i > 0) st.fxLevel = i === 2 ? 1 : 0.5;
+      });
+      option('Chase cam distance', row++, ['Very close', 'Close', 'Medium', 'Far', 'Very far'], Math.max(0, CHASE_DISTS.indexOf(st.chaseDist)), (i) => (st.chaseDist = CHASE_DISTS[i]));
+      option('Chase cam height', row++, ['Very low', 'Low', 'Medium', 'High', 'Very high'], Math.max(0, CHASE_HEIGHTS.indexOf(st.chaseHeight)), (i) => (st.chaseHeight = CHASE_HEIGHTS[i]));
       option('Look', row++, ['Normal', 'Street (comic)', '90s VHS tape', '90s 32-bit console'], RETRO_LOOKS.indexOf(st.retro), (i) => (st.retro = RETRO_LOOKS[i]));
       option('Time of day', row++, ['Day cycle', 'Morning', 'Noon', 'Sunset', 'Night'], TIMES_OF_DAY.indexOf(st.timeOfDay), (i) => (st.timeOfDay = TIMES_OF_DAY[i]));
       option('Graphics', row++, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
@@ -719,8 +735,96 @@ export class Menus {
     panel.append(swatches, paintInfo);
     if (this.status) panel.append(h('div', 'status', this.status));
     const back = h('div', 'menu-list');
-    back.append(this.button('Back', paintRow + 1, () => this.back()));
+    const tuneBtn = this.button(`Tune the ${current.name}`, paintRow + 1, () => this.open('tune'), 'menu-btn primary');
+    tuneBtn.append(h('span', 'value', `${peakPower(specFor(p, current))} hp  ›`));
+    back.append(tuneBtn, this.button('Back', paintRow + 2, () => this.back()));
     panel.append(back, this.controlsHint(), h('div', 'menu-hint', 'Right stick or drag to look around · L2 / R2 or scroll to zoom'));
+  }
+
+  /** Tuning: one row per part; left/right to look through the levels, ✕ to buy or fit. */
+  private renderTune(panel: HTMLElement) {
+    const p = this.progress;
+    const model = carById(p.car);
+    this.hooks.preview(model, paintFor(p, model.id).color);
+    const fitted = tuneFor(p, model.id);
+    const looking: Tune = { ...fitted, ...this.tunePreview };
+    const now = specFor(p, model);
+    const next = tunedSpec(model.spec, looking);
+    panel.append(h('h2', undefined, `Tune the ${model.name}`), this.credsLine());
+
+    const figures = h('div', 'tune-figures');
+    const fig = (label: string, a: number, b: number, fmt: (x: number) => string, lowerIsBetter = false) => {
+      const el = h('div', 'tune-fig');
+      el.append(h('span', undefined, label), h('b', undefined, fmt(b)));
+      if (fmt(a) !== fmt(b)) el.append(h('i', b > a !== lowerIsBetter ? 'up' : 'down', `${b > a ? '+' : '−'}${fmt(Math.abs(b - a))}`));
+      figures.append(el);
+    };
+    const whole = (unit: string) => (x: number) => `${Math.round(x).toLocaleString()} ${unit}`;
+    fig('Power', peakPower(now), peakPower(next), whole('hp'));
+    fig('Torque', peakTorque(now), peakTorque(next), whole('Nm'));
+    fig('Weight', now.mass, next.mass, whole('kg'), true);
+    fig('Boost', now.turbo?.maxBoost ?? 0, next.turbo?.maxBoost ?? 0, (x) => `${x.toFixed(1)} bar`);
+    panel.append(figures);
+
+    const info = h('div', 'status', this.status || PARTS[0].blurb);
+    const list = h('div', 'menu-list');
+    PARTS.forEach((part, row) => {
+      const lvl = looking[part.id] ?? 0;
+      const owned = ownedLevel(p, model.id, part.id);
+      const isFitted = (fitted[part.id] ?? 0) === lvl;
+      const el = h('div', 'menu-btn setting tune-row');
+      const state = isFitted ? 'Fitted' : lvl <= owned ? 'Owned · ✕ to fit' : `◆ ${part.prices[lvl].toLocaleString()}`;
+      const name = part.id === 'turbo' && !model.spec.turbo && lvl === 0 ? 'None' : part.levels[lvl];
+      const val = h('span', 'value');
+      const step = (d: number) => {
+        const n = Math.max(0, Math.min(part.levels.length - 1, lvl + d));
+        if (n === lvl) return;
+        this.tunePreview = { ...this.tunePreview, [part.id]: n };
+        this.rerenderKeepingFocus();
+      };
+      const arrow = (text: string, d: number) => {
+        const a = h('i', 'arrow', text);
+        a.addEventListener('click', (e) => {
+          e.stopPropagation();
+          step(d);
+        });
+        return a;
+      };
+      val.append(arrow('‹', -1), h('span', 'value-text', name), arrow('›', 1));
+      const label = h('span', 'tune-label');
+      label.append(h('b', undefined, part.name), h('small', state === 'Fitted' ? 'fitted' : lvl > owned ? 'price' : '', state));
+      el.append(label, val);
+      this.add(el, row, 0, {
+        focus: () => {
+          if (!this.status) info.textContent = part.blurb;
+        },
+        left: () => step(-1),
+        right: () => step(1),
+        confirm: () => {
+          if (isFitted) return;
+          const r = fitPart(p, model.id, part.id, lvl);
+          this.status =
+            r === 'too-poor'
+              ? `You need ${(part.prices[lvl] - p.creds).toLocaleString()} more creds for that.`
+              : r === 'bought'
+                ? `${part.levels[lvl]} bought and fitted.`
+                : `${lvl === 0 ? 'Back to stock' : part.levels[lvl]} fitted.`;
+          if (r !== 'too-poor') {
+            delete this.tunePreview[part.id];
+            saveProgress(p);
+            this.hooks.carChanged();
+          }
+          this.rerenderKeepingFocus();
+        },
+      });
+      list.append(el);
+    });
+    panel.append(list);
+    if (clutchWillSlip(next)) panel.append(h('div', 'status warn', 'This much torque will make the clutch slip. Fit a stronger clutch.'));
+    panel.append(info);
+    const back = h('div', 'menu-list');
+    back.append(this.button('Back to the garage', PARTS.length, () => this.back()));
+    panel.append(back, h('div', 'menu-hint', '‹ › to look through parts · ✕ / Enter to buy or fit'));
   }
 
   private renderControls(panel: HTMLElement) {

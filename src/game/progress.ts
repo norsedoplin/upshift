@@ -16,6 +16,9 @@ export interface Settings {
   clutchFeel: boolean; // DualSense adaptive trigger pushes back at the bite point
   timeOfDay: TimeOfDay; // cycle = the sun moves while you drive
   speedFx: boolean; // field of view widens and the view shivers a little at speed
+  fxLevel: number; // how strong the speed lines and smear are: 0.5 subtle, 1 strong
+  chaseDist: number; // chase camera distance behind the car, m
+  chaseHeight: number; // chase camera height above the road, m
   retro: RetroLook; // the picture's look: normal, comic street style, or a 90s filter
   mouseClutch: number; // 0 = off, else pixels of mouse travel for the whole pedal
   map: string; // which road you drive (see track/maps.ts)
@@ -24,6 +27,8 @@ export interface Settings {
 export type RetroLook = 'off' | 'street' | 'vhs' | 'console';
 export const RETRO_LOOKS: RetroLook[] = ['off', 'street', 'vhs', 'console'];
 export const MOUSE_TRAVELS = [0, 160, 260, 420];
+export const CHASE_DISTS = [3.8, 4.4, 5, 5.8, 6.8];
+export const CHASE_HEIGHTS = [1.6, 2.1, 2.6, 3.2, 3.9];
 
 export type TimeOfDay = 'cycle' | 'morning' | 'noon' | 'sunset' | 'night';
 export const TIMES_OF_DAY: TimeOfDay[] = ['cycle', 'morning', 'noon', 'sunset', 'night'];
@@ -50,6 +55,8 @@ export interface Progress {
   creds: number;
   bestScore: number;
   bestByMap: Record<string, number>; // best run on each road
+  partsOwned: Record<string, number>; // 'car:part' -> highest level bought
+  partsFitted: Record<string, number>; // 'car:part' -> level fitted now
   runs: number;
   ownedCars: string[];
   ownedPaints: string[];
@@ -61,13 +68,15 @@ export interface Progress {
 
 const KEY = 'upshift.progress.v1';
 
-export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high', speedo: 'auto', bindings: defaultBindings(), clutchFeel: true, timeOfDay: 'cycle', speedFx: true, retro: 'off', mouseClutch: 0, map: 'koyo' };
+export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high', speedo: 'auto', bindings: defaultBindings(), clutchFeel: true, timeOfDay: 'cycle', speedFx: true, fxLevel: 0.5, chaseDist: 5, chaseHeight: 2.6, retro: 'off', mouseClutch: 0, map: 'koyo' };
 
 export function defaultProgress(): Progress {
   return {
     creds: 0,
     bestScore: 0,
     bestByMap: {},
+    partsOwned: {},
+    partsFitted: {},
     runs: 0,
     ownedCars: ['hatch'],
     ownedPaints: [],
@@ -107,6 +116,11 @@ export function parseProgress(raw: string | null): Progress {
     p.creds = Math.max(0, num(s.creds, 0));
     p.bestScore = Math.max(0, num(s.bestScore, 0));
     p.runs = Math.max(0, num(s.runs, 0));
+    for (const f of ['partsOwned', 'partsFitted'] as const) {
+      if (s[f] && typeof s[f] === 'object') {
+        for (const [k, v] of Object.entries(s[f])) if (typeof v === 'number' && v >= 0 && v <= 2) p[f][k] = Math.round(v);
+      }
+    }
     if (s.bestByMap && typeof s.bestByMap === 'object') {
       for (const [k, v] of Object.entries(s.bestByMap)) if (typeof v === 'number' && v > 0) p.bestByMap[k] = v;
     }
@@ -133,6 +147,9 @@ export function parseProgress(raw: string | null): Progress {
       clutchFeel: typeof st.clutchFeel === 'boolean' ? st.clutchFeel : true,
       timeOfDay: TIMES_OF_DAY.includes(st.timeOfDay) ? st.timeOfDay : DEFAULT_SETTINGS.timeOfDay,
       speedFx: typeof st.speedFx === 'boolean' ? st.speedFx : true,
+      fxLevel: st.fxLevel === 1 ? 1 : 0.5,
+      chaseDist: CHASE_DISTS.includes(st.chaseDist) ? st.chaseDist : DEFAULT_SETTINGS.chaseDist,
+      chaseHeight: CHASE_HEIGHTS.includes(st.chaseHeight) ? st.chaseHeight : DEFAULT_SETTINGS.chaseHeight,
       retro: RETRO_LOOKS.includes(st.retro) ? st.retro : DEFAULT_SETTINGS.retro,
       mouseClutch: MOUSE_TRAVELS.includes(st.mouseClutch) ? st.mouseClutch : 0,
       map: typeof st.map === 'string' ? st.map : DEFAULT_SETTINGS.map,

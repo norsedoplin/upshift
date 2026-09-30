@@ -144,6 +144,7 @@ const RONIN: CarModel = {
     biteStart: 0.3,
     biteEnd: 0.72,
     starterTorque: 70,
+    turbo: { maxBoost: 0.9, lo: 0.62, hi: 1, spoolRpm: 3700, lag: 0.5 },
   },
   chassis: {
     ...HATCHBACK_CHASSIS,
@@ -187,6 +188,8 @@ const RAIJIN: CarModel = {
     biteStart: 0.32,
     biteEnd: 0.7,
     starterTorque: 60,
+    // Sequential twins: the small one spools early, so less lag than the Ronin.
+    turbo: { maxBoost: 0.8, lo: 0.66, hi: 1, spoolRpm: 3300, lag: 0.35 },
   },
   chassis: {
     ...HATCHBACK_CHASSIS,

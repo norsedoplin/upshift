@@ -60,7 +60,7 @@ const FxShader = {
       vec2 d = vUv - 0.5;
       float r = length(d * vec2(res.x / res.y, 1.0));
       // Speed smear: sample back towards the centre, more at the edges.
-      float amt = (speed * 0.045 + punch * 0.05) * smoothstep(0.18, 0.8, r);
+      float amt = (speed * 0.03 + punch * 0.03) * smoothstep(0.25, 0.85, r);
       vec3 c = vec3(0.0);
       for (int i = 0; i < 6; i++) c += tap(vUv - d * amt * float(i) / 5.0);
       c /= 6.0;
@@ -90,7 +90,7 @@ const FxShader = {
         c = mix(c, vec3(0.06, 0.04, 0.1), ink * 0.9);
       }
       // Speed lines: thin streaks at random angles that start part way in from the edge.
-      float lines = speed * 0.55 + punch;
+      float lines = speed * 0.45 + punch * 0.6;
       if (lines > 0.01) {
         float ang = atan(d.y, d.x) / 6.2832 + 0.5;
         float slot = floor(ang * 180.0);
@@ -99,7 +99,7 @@ const FxShader = {
         float from = 0.28 + 0.3 * hash(seed + 3.1);
         float across = abs(fract(ang * 180.0) - 0.5);
         float line = on * smoothstep(from, from + 0.15, r) * smoothstep(0.45, 0.1, across);
-        c = mix(c, vec3(1.0), clamp(line * lines * 0.5, 0.0, 0.55));
+        c = mix(c, vec3(1.0), clamp(line * lines * 0.4, 0.0, 0.35));
       }
       vec3 s = c * c * (3.0 - 2.0 * c); // smoothstep S-curve
       c = mix(c, s, 0.18);

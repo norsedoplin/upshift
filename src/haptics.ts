@@ -85,10 +85,13 @@ export class Haptics {
     // Subtle idle buzz so a running engine is felt; much quieter than the bite.
     const idle = car.running ? 0.012 + (rpm / 7000) * 0.04 : car.cranking ? 0.2 : 0;
 
-    this.strong = clamp01(bite + lug * 0.4 + this.impulse);
+    // On boost the car hums through the seat.
+    const tb = car.spec.turbo;
+    const boost = tb ? (car.boost / tb.maxBoost) * car.throttleEff : 0;
+    this.strong = clamp01(bite + lug * 0.4 + this.impulse + boost * 0.12);
     // Tyres near and past their grip limit: a fine buzz you can drive by.
     const scrub = Math.max(0, Math.min(1, (tyreSlip - 0.08) / 0.2)) * (0.6 + 0.4 * Math.sin(this.t * 2 * Math.PI * 23));
-    this.weak = clamp01(idle + bite * 0.35 + this.buzz * 0.9 + lug * 0.12 + scrub * 0.22);
+    this.weak = clamp01(idle + boost * 0.1 + bite * 0.35 + this.buzz * 0.9 + lug * 0.12 + scrub * 0.22);
 
     if (this.dualsense.connected) {
       if (performance.now() < this.testUntil) return;
