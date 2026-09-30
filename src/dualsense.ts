@@ -2,8 +2,13 @@
 // Chrome's Gamepad API often gives a DualSense no vibrationActuator, so we talk to the pad ourselves:
 // output report 0x02 over USB, 0x31 (with a CRC) over Bluetooth. Layout follows Linux's hid-playstation.
 
+interface HIDReportItem {
+  reportSize?: number; // bits per field
+  reportCount?: number;
+}
 interface HIDReportInfo {
   reportId: number;
+  items?: HIDReportItem[];
 }
 interface HIDCollection {
   outputReports?: HIDReportInfo[];
@@ -46,7 +51,7 @@ export function crc32(bytes: Uint8Array, seed = 0xffffffff) {
 }
 
 /** Builds the report body (without the report id) for a rumble of 0..1 on each motor. */
-export function rumbleReport(bluetooth: boolean, strong: number, weak: number, seq = 0, v2 = true): Uint8Array {
+export function rumbleReport(bluetooth: boolean, strong: number, weak: number, seq = 0, v2 = true, usbLength = 47): Uint8Array {
   const toByte = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
   // Common block: valid_flag0, valid_flag1, motor_right (weak), motor_left (strong), ..., valid_flag2 at 38.
   const common = new Uint8Array(47);
@@ -57,7 +62,8 @@ export function rumbleReport(bluetooth: boolean, strong: number, weak: number, s
   common[3] = toByte(strong);
   if (v2) common[38] = 0x04;
   if (!bluetooth) {
-    const data = new Uint8Array(62);
+    // Over USB the body is the common block; Windows rejects a report longer than the descriptor says (47 bytes).
+    const data = new Uint8Array(Math.max(47, usbLength));
     data.set(common, 0);
     return data;
   }
@@ -82,6 +88,8 @@ export class DualSense {
   vibrationV2 = true;
   firmware = '';
   lastError = '';
+  /** Body length of USB report 0x02 as the device describes it. */
+  usbLength = 47;
   private seq = 0;
   private busy = false;
   private pending: [number, number] | null = null;
@@ -119,6 +127,7 @@ export class DualSense {
     if (!d.opened) await d.open();
     this.device = d;
     this.bluetooth = d.collections.some((c) => c.outputReports?.some((r) => r.reportId === 0x31));
+    this.usbLength = reportLength(d, 0x02) ?? 47;
     this.last = [-1, -1];
     this.lastError = '';
     await this.readFirmware();
@@ -157,7 +166,7 @@ export class DualSense {
   private send(strong: number, weak: number) {
     const id = this.bluetooth ? 0x31 : 0x02;
     this.lastSent = performance.now();
-    return this.device!.sendReport(id, rumbleReport(this.bluetooth, strong, weak, this.seq++, this.vibrationV2));
+    return this.device!.sendReport(id, rumbleReport(this.bluetooth, strong, weak, this.seq++, this.vibrationV2, this.usbLength));
   }
 
   /** Set both motors (0..1). Cheap to call every frame: it only sends when something changed. */
@@ -196,3 +205,14 @@ export class DualSense {
   }
 }
 
+
+/** Byte length of an output report from the device's descriptor, if it lists one. */
+function reportLength(d: HIDDeviceLike, id: number) {
+  for (const c of d.collections) {
+    const r = c.outputReports?.find((x) => x.reportId === id);
+    if (!r?.items?.length) continue;
+    const bits = r.items.reduce((n, it) => n + (it.reportSize ?? 0) * (it.reportCount ?? 0), 0);
+    if (bits > 0) return Math.ceil(bits / 8);
+  }
+  return null;
+}
