@@ -43,13 +43,32 @@ export interface RunStats {
   heelToe: number;
   stalls: number;
   bestCombo: number;
+  flow: number; // points from keeping the car in its powerband
+}
+
+/** Combo tiers: names for the multiplier as it climbs. */
+export const TIERS: { at: number; name: string }[] = [
+  { at: 0, name: '' },
+  { at: 2, name: 'WARM' },
+  { at: 4, name: 'HOT' },
+  { at: 6, name: 'ON FIRE' },
+  { at: 8, name: 'TOUGE KING' },
+];
+
+export function tierFor(combo: number) {
+  let t = TIERS[0];
+  for (const x of TIERS) if (combo >= x.at) t = x;
+  return t;
 }
 
 export class Scorer {
   time = 0;
   score = 0;
   combo = 0;
-  stats: RunStats = { score: 0, shifts: 0, perfect: 0, clean: 0, heelToe: 0, stalls: 0, bestCombo: 0 };
+  stats: RunStats = { score: 0, shifts: 0, perfect: 0, clean: 0, heelToe: 0, stalls: 0, bestCombo: 0, flow: 0 };
+  /** 0..1: how much of the current flow streak has built up (for the HUD). */
+  flowLevel = 0;
+  private flowAcc = 0;
   private events: ScoreEvent[] = [];
   private pending: PendingShift | null = null;
   private clutchDownAt = -1;
@@ -85,7 +104,29 @@ export class Scorer {
   }
 
   private breakCombo() {
+    if (this.combo >= 2) this.events.push({ label: 'COMBO LOST', points: 0, combo: this.combo, good: false });
     this.combo = 0;
+    this.flowLevel = 0;
+  }
+
+  /**
+   * Flow: a steady trickle of points while the car is in gear, moving and inside its
+   * powerband. It builds up over a few seconds and grows with the combo, so a clean run
+   * keeps the counter ticking between shifts.
+   */
+  private updateFlow(dt: number, car: Car) {
+    const rpm = car.rpm;
+    const inBand = car.running && car.locked && car.gear > 0 && Math.abs(car.speed) > 8 && rpm > 2600 && rpm < car.spec.revLimit - 200;
+    this.flowLevel = inBand ? Math.min(1, this.flowLevel + dt / 4) : Math.max(0, this.flowLevel - dt / 1.5);
+    if (!inBand) return;
+    this.flowAcc += dt * 8 * this.flowLevel * this.multiplier;
+    if (this.flowAcc >= 1) {
+      const pts = Math.floor(this.flowAcc);
+      this.flowAcc -= pts;
+      this.score += pts;
+      this.stats.flow += pts;
+      this.stats.score = this.score;
+    }
   }
 
   update(dt: number, car: Car, inp: ScoreInputs, carEvents: CarEvent[]) {
@@ -170,6 +211,7 @@ export class Scorer {
       this.limiterFlagged = true;
       this.award('ON THE LIMITER', -10, false);
     }
+    this.updateFlow(dt, car);
     this.lastGear = car.gear;
   }
 
@@ -237,4 +279,9 @@ export class Scorer {
 /** Creds earned for a finished run. */
 export function credsForRun(stats: RunStats) {
   return Math.round(stats.score / 10) + 20;
+}
+
+/** Creds for a run cut short (restart or quit): the score so far, without the finish bonus. */
+export function cashoutFor(stats: RunStats) {
+  return Math.round(stats.score / 10);
 }

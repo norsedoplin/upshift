@@ -445,6 +445,7 @@ export class Menus {
     row('Heel-toe', String(s.stats.heelToe));
     row('Best combo', `×${(1 + Math.min(s.stats.bestCombo, 8) * 0.25).toFixed(2)}`);
     row('Stalls', String(s.stats.stalls));
+    row('Flow points', (s.stats.flow ?? 0).toLocaleString());
     panel.append(dl);
     const list = h('div', 'menu-list');
     list.append(
@@ -467,8 +468,6 @@ export class Menus {
     const option = (label: string, row: number, values: string[], index: number, set: (i: number) => void) => {
       const el = h('div', 'menu-btn setting');
       const val = h('span', 'value');
-      val.innerHTML = `<i>‹</i> ${values[index]} <i>›</i>`;
-      el.append(h('span', undefined, label), val);
       // Left/right stop at the ends; ✕ cycles round.
       const step = (d: number, wrap = false) => {
         const next = wrap ? (index + d + values.length) % values.length : Math.max(0, Math.min(values.length - 1, index + d));
@@ -476,6 +475,17 @@ export class Menus {
         set(next);
         changed();
       };
+      // The arrows are buttons too, so a mouse can go down as well as up.
+      const arrow = (text: string, d: number) => {
+        const a = h('i', 'arrow', text);
+        a.addEventListener('click', (e) => {
+          e.stopPropagation();
+          step(d);
+        });
+        return a;
+      };
+      val.append(arrow('‹', -1), h('span', 'value-text', values[index]), arrow('›', 1));
+      el.append(h('span', undefined, label), val);
       this.add(el, row, 0, { left: () => step(-1), right: () => step(1), confirm: () => step(1, true) });
       list.append(el);
     };

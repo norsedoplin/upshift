@@ -14,7 +14,7 @@ import { buildScenery, SUN_DIR } from './track/scenery';
 import { DayCycle } from './track/daylight';
 import { Graphics, bakeEnvironment } from './graphics';
 import { collideWithEdges } from './track/collide';
-import { Scorer, credsForRun, ScoreEvent } from './game/scoring';
+import { Scorer, cashoutFor, credsForRun, tierFor, ScoreEvent } from './game/scoring';
 import { CAMERA_VIEWS, loadProgress, saveProgress } from './game/progress';
 import { paintFor } from './game/shop';
 import { carById, forwardGears } from './cars';
@@ -85,7 +85,20 @@ const padStatus = $('pad-status');
 const pedals = { clutch: $('bar-clutch'), brake: $('bar-brake'), throttle: $('bar-throttle') };
 const hint = $('hint');
 const speedo = $('speedo') as HTMLCanvasElement;
-const hud = { score: $('score'), combo: $('combo'), creds: $('creds'), timer: $('timer'), progress: $('progress-fill') };
+const hud = {
+  score: $('score'),
+  combo: $('combo'),
+  tier: $('tier'),
+  mult: $('mult'),
+  comboFill: $('combo-fill'),
+  flowFill: $('flow-fill'),
+  creds: $('creds'),
+  timer: $('timer'),
+  progress: $('progress-fill'),
+};
+const cashoutEl = $('cashout');
+let shownScore = 0;
+let lastTier = '';
 const toasts = $('toasts');
 
 type RunState = 'idle' | 'running' | 'finished';
@@ -104,10 +117,12 @@ const menus = new Menus(progress, {
   },
   resume: () => menus.open(null),
   restart: () => {
+    cashOut();
     resetRun();
     menus.open(null);
   },
   toMenu: () => {
+    cashOut();
     resetRun();
     menus.open('main');
   },
@@ -254,6 +269,7 @@ function resetRun() {
   roadIndex = loc.index;
   roadS = loc.s;
   scorer.reset();
+  chaseCam.ready = false; // snap the chase camera behind the car instead of swooping over
   run = 'idle';
   runTime = 0;
   toasts.innerHTML = '';
@@ -342,7 +358,10 @@ function frame(now: number) {
     debugOn = !debugOn;
     debug.classList.toggle('hidden', !debugOn);
   }
-  if (c.reset) resetRun();
+  if (c.reset) {
+    cashOut();
+    resetRun();
+  }
   if (c.cycleCamera) cycleCamera();
   if (c.ignition) {
     if (car.running) car.stopEngine();
@@ -426,8 +445,7 @@ function frame(now: number) {
   if (progress.settings.camera === 'chase') updateChaseCamera(dt, loc.h);
 
   cockpit.wheel.rotation.z = Math.max(-7.8, Math.min(7.8, chassis.steerAngle * 14));
-  const [col, row] = shifterPose(car.gear);
-  cockpit.shifter.rotation.set(row * 0.22, 0, -col * 0.2);
+  moveShifter(dt);
   cockpit.clutchPedal.rotation.x = -c.clutch * 0.5;
   cockpit.brakePedal.rotation.x = -c.brake * 0.4;
   cockpit.throttlePedal.rotation.x = -c.throttle * 0.4;
@@ -484,6 +502,26 @@ function drawRide(tile: HTMLCanvasElement, dt: number) {
   tile.getContext('2d')?.drawImage(renderer.domElement, 0, 0, w, h, 0, 0, w, h);
 }
 
+/**
+ * The gear lever travels through the H-gate rather than snapping: back to the middle of the
+ * gate, across, then into the new gear.
+ */
+const lever = { col: 0, row: 0 };
+function moveShifter(dt: number) {
+  const [col, row] = shifterPose(car.gear);
+  const speed = dt * 9;
+  const toward = (v: number, t: number) => v + Math.max(-speed, Math.min(speed, t - v));
+  if (Math.abs(lever.col - col) > 0.01) {
+    // Different plane: centre first, then across.
+    if (Math.abs(lever.row) > 0.05) lever.row = toward(lever.row, 0);
+    else lever.col = toward(lever.col, col);
+  } else {
+    lever.col = col;
+    lever.row = toward(lever.row, row);
+  }
+  cockpit.shifter.rotation.set(lever.row * 0.24, 0, -lever.col * 0.2);
+}
+
 /** A camera that trails the car, lagging a little in yaw so corners are readable. */
 function updateChaseCamera(dt: number, groundY: number) {
   const k = chaseCam.ready ? Math.min(1, dt * 4) : 1;
@@ -500,6 +538,37 @@ function updateChaseCamera(dt: number, groundY: number) {
   camera.position.copy(chaseCam.pos);
   camera.lookAt(target.x - back.x * 2, groundY + 0.9, target.z - back.z * 2);
 }
+
+/** Leaving a run early still pays: the score so far becomes creds, shown with a little count-up. */
+function cashOut() {
+  if (run !== 'running' || scorer.score <= 0) return;
+  const earned = cashoutFor(scorer.stats);
+  if (earned <= 0) return;
+  const score = scorer.score;
+  progress.creds += earned;
+  progress.runs += 1;
+  progress.bestScore = Math.max(progress.bestScore, score);
+  saveProgress(progress);
+  cashoutEl.innerHTML = `<span class="co-label">Cashed out</span><span class="co-score">${score.toLocaleString()} pts</span><b class="co-creds">◆ +0</b>`;
+  cashoutEl.classList.remove('hidden', 'leave');
+  // Restart the entry animation.
+  void cashoutEl.offsetWidth;
+  cashoutEl.classList.add('show');
+  const credsEl = cashoutEl.querySelector('.co-creds')!;
+  const t0 = performance.now();
+  const tick = (now: number) => {
+    const k = Math.min(1, (now - t0) / 900);
+    credsEl.textContent = `◆ +${Math.round(earned * (1 - (1 - k) ** 3)).toLocaleString()}`;
+    if (k < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  clearTimeout(cashoutTimer);
+  cashoutTimer = window.setTimeout(() => {
+    cashoutEl.classList.add('leave');
+    cashoutTimer = window.setTimeout(() => cashoutEl.classList.add('hidden'), 400);
+  }, 2600);
+}
+let cashoutTimer = 0;
 
 function finishRun() {
   run = 'finished';
@@ -520,10 +589,19 @@ function formatTime(t: number) {
   return `${m}:${s.toFixed(1).padStart(4, '0')}`;
 }
 
-function showToast(e: ScoreEvent) {
+function showToast(e: ScoreEvent, extra = '') {
   const el = document.createElement('div');
-  el.className = `toast ${e.good ? 'good' : 'bad'}`;
-  el.innerHTML = `<span>${e.label}</span><b>${e.points > 0 ? '+' : ''}${e.points}</b>`;
+  const big = e.label.startsWith('PERFECT') || e.label === 'HEEL-TOE';
+  el.className = `toast ${e.good ? 'good' : 'bad'}${big ? ' big' : ''}`;
+  const pts = e.points === 0 ? '' : `${e.points > 0 ? '+' : ''}${e.points}`;
+  el.innerHTML = `<span>${e.label}</span>${pts ? `<b>${pts}</b>` : ''}`;
+  // A little bump on the score when points land.
+  if (e.points !== 0) {
+    hud.score.classList.remove('bump', 'hurt');
+    void hud.score.offsetWidth;
+    hud.score.classList.add(e.points > 0 ? 'bump' : 'hurt');
+  }
+  if (extra) el.classList.add(extra);
   toasts.prepend(el);
   while (toasts.children.length > 4) toasts.lastChild!.remove();
   setTimeout(() => el.classList.add('fade'), 1800);
@@ -537,8 +615,18 @@ function updateHud(clutch: number, brake: number, throttle: number, pad: Gamepad
   const inBite = car.clutchCapacity > 0 && car.clutchCapacity < car.spec.clutchMaxTorque * 0.95;
   pedals.clutch.classList.toggle('bite', inBite);
 
-  hud.score.textContent = scorer.score.toLocaleString();
-  hud.combo.textContent = scorer.combo > 0 ? `×${scorer.multiplier.toFixed(2)}` : '';
+  // The counter rolls up to the score rather than jumping.
+  shownScore = scorer.score < shownScore ? scorer.score : shownScore + Math.max(1, (scorer.score - shownScore) * 0.15);
+  if (shownScore > scorer.score) shownScore = scorer.score;
+  hud.score.textContent = Math.round(shownScore).toLocaleString();
+  const tier = tierFor(scorer.combo).name;
+  hud.tier.textContent = tier;
+  hud.mult.textContent = scorer.combo > 0 ? `×${scorer.multiplier.toFixed(2)}` : '';
+  hud.combo.dataset.tier = tier.toLowerCase().replace(/ /g, '-');
+  hud.comboFill.style.width = `${(Math.min(scorer.combo, 8) / 8) * 100}%`;
+  hud.flowFill.style.width = `${scorer.flowLevel * 100}%`;
+  if (tier && tier !== lastTier && run === 'running') showToast({ label: `${tier} ×${scorer.multiplier.toFixed(2)}`, points: 0, combo: scorer.combo, good: true }, 'tier');
+  lastTier = tier;
   hud.creds.textContent = `◆ ${progress.creds.toLocaleString()}`;
   hud.timer.textContent = run === 'idle' ? 'Drive to the start line' : formatTime(runTime);
   const frac = Math.min(1, Math.max(0, (s - road.startS) / (road.finishS - road.startS)));

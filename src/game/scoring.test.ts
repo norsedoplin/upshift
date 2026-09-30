@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Car, CarInputs } from '../sim/car';
-import { Scorer, ScoreEvent } from './scoring';
+import { Scorer, ScoreEvent, cashoutFor, tierFor } from './scoring';
 
 const DT = 0.001;
 const FRAME = 1 / 60;
@@ -106,5 +106,17 @@ describe('scoring', () => {
     const ev = play(car, sc, 2, () => ({ throttle: 0, brake: 0, clutch: 0 }));
     expect(ev.map((e) => e.label)).toContain('STALLED');
     expect(sc.combo).toBe(0);
+  });
+});
+
+describe('combo tiers and cashout', () => {
+  it('names the combo as it climbs', () => {
+    expect(tierFor(0).name).toBe('');
+    expect(tierFor(4).name).toBe('HOT');
+    expect(tierFor(12).name).toBe('TOUGE KING');
+  });
+  it('pays a tenth of the score when you leave early, without the finish bonus', () => {
+    const stats = { score: 1840, shifts: 0, perfect: 0, clean: 0, heelToe: 0, stalls: 0, bestCombo: 0, flow: 0 };
+    expect(cashoutFor(stats)).toBe(184);
   });
 });

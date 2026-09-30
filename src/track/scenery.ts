@@ -697,66 +697,94 @@ function buildTrees(road: Road, terrain: Terrain, b: Bounds) {
   const trunkMat = new THREE.MeshStandardMaterial({ color: '#7a5a3f', flatShading: true, roughness: 1 });
   const pineMat = new THREE.MeshStandardMaterial({ color: '#ffffff', flatShading: true, roughness: 0.9 });
   const leafMat = new THREE.MeshStandardMaterial({ color: '#ffffff', flatShading: true, roughness: 0.9 });
-  const N = 11000;
-  const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, N);
-  const pines = new THREE.InstancedMesh(crownGeo, pineMat, N);
-  const rounds = new THREE.InstancedMesh(roundGeo, leafMat, N);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const c = new THREE.Color();
-  const PINE = [new THREE.Color('#3f7043'), new THREE.Color('#557f45'), new THREE.Color('#35603f')];
+  const PINE = [new THREE.Color('#3f7043'), new THREE.Color('#557f45'), new THREE.Color('#35603f'), new THREE.Color('#2e5538')];
   const LEAF = [new THREE.Color('#6f9d4b'), new THREE.Color('#86a84c'), new THREE.Color('#5d8c45'), new THREE.Color('#a3a549')];
   const pick = (list: THREE.Color[], h: number, h2: number) => c.copy(list[Math.floor(h * list.length)]).lerp(list[Math.floor(h2 * list.length)], 0.5);
-  let t = 0;
-  let p = 0;
-  let r = 0;
   const clear = (x: number, z: number, margin: number) => {
     const near = terrain.nearest(x, z);
     return near.dist >= road.wallOffset + margin + terrain.lotAt(x, z, near.index);
   };
-  const spots: [number, number][] = [];
-  // Rows of trees right behind the verge, so the roadside rushes past.
-  for (let i = 0; i < road.samples.length; i += 3) {
+
+  // A proper touge forest: a wall of trees along both sides of the whole road, a few rows
+  // deep, so you drive down a corridor and only see out at the lots and the odd clearing.
+  const spots: { x: number; z: number; big: boolean }[] = [];
+  for (let i = 0; i < road.samples.length; i += 2) {
     const a = road.samples[i];
     for (const side of [-1, 1]) {
-      if (hash(i, side + 90) < 0.3 || valueNoise(a.s / 60, side * 7) < 0.3) continue;
-      const [x, , z] = at(a, side * (road.wallOffset + 2.2 + hash(i, side + 91) * 6), 0);
-      if (clear(x, z, 2)) spots.push([x, z]);
+      // Clearings: now and then the forest opens up for a view.
+      if (valueNoise(a.s / 140 + (side > 0 ? 40 : 0), 3.3) < 0.2) continue;
+      for (let row = 0; row < 11; row++) {
+        const hh = hash(i * 13 + row, side + 90);
+        if (hh < 0.18) continue;
+        const along = (hash(i, row + side * 31) - 0.5) * 3.6;
+        const p = road.sampleAt(a.s + along);
+        const off = road.wallOffset + 2 + row * 4 + hash(i + row, side + 91) * 3;
+        const [x, , z] = at(p, side * off, 0);
+        if (clear(x, z, 1.8)) spots.push({ x, z, big: row > 2 });
+      }
     }
   }
-  for (let i = 0; i < N * 3 && spots.length < N; i++) {
+  // Forest across the rest of the mountainside, in clumps.
+  for (let i = 0; i < 24000 && spots.length < 34000; i++) {
     const x = b.minX + hash(i, 2) * (b.maxX - b.minX);
     const z = b.minZ + hash(i, 3) * (b.maxZ - b.minZ);
-    // Forests come in clumps, thicker near the road.
     if (valueNoise(x / 90, z / 90) < 0.36) continue;
-    if (clear(x, z, 2.5)) spots.push([x, z]);
+    if (clear(x, z, 2.5)) spots.push({ x, z, big: true });
   }
-  for (let i = 0; i < spots.length && t < N; i++) {
-    const [x, z] = spots[i];
-    const y = terrain.height(x, z);
-    const sc = 0.7 + hash(i, 4) * 0.8;
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), hash(i, 5) * 6.28);
-    const s = new THREE.Vector3(sc, sc * (0.9 + hash(i, 7) * 0.25), sc);
-    m.compose(new THREE.Vector3(x, y + 0.8 * sc, z), q, s);
-    trunks.setMatrixAt(t++, m);
-    if (hash(i, 6) > 0.35) {
-      m.compose(new THREE.Vector3(x, y + 3.4 * sc, z), q, s);
-      pines.setColorAt(p, pick(PINE, hash(i, 13), hash(i, 14)));
-      pines.setMatrixAt(p++, m);
-    } else {
-      m.compose(new THREE.Vector3(x, y + 3 * sc, z), q, s);
-      rounds.setColorAt(r, pick(LEAF, hash(i, 13), hash(i, 14)));
-      rounds.setMatrixAt(r++, m);
+
+  // Split into tiles so each tile can be culled on its own, which keeps this many trees
+  // cheap: most of the forest is off screen or outside the small shadow area at any moment.
+  const TILE = 180;
+  const tiles = new Map<string, number[]>();
+  spots.forEach((sp, i) => {
+    const key = `${Math.floor(sp.x / TILE)},${Math.floor(sp.z / TILE)}`;
+    let list = tiles.get(key);
+    if (!list) tiles.set(key, (list = []));
+    list.push(i);
+  });
+  const up = new THREE.Vector3(0, 1, 0);
+  const pos = new THREE.Vector3();
+  const scl = new THREE.Vector3();
+  for (const list of tiles.values()) {
+    const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, list.length);
+    const pines = new THREE.InstancedMesh(crownGeo, pineMat, list.length);
+    const rounds = new THREE.InstancedMesh(roundGeo, leafMat, list.length);
+    let t = 0;
+    let p = 0;
+    let r = 0;
+    for (const i of list) {
+      const { x, z, big } = spots[i];
+      const y = terrain.height(x, z);
+      const sc = (big ? 0.95 : 0.75) + hash(i, 4) * (big ? 0.85 : 0.6);
+      q.setFromAxisAngle(up, hash(i, 5) * 6.28);
+      scl.set(sc, sc * (0.9 + hash(i, 7) * 0.35), sc);
+      m.compose(pos.set(x, y + 0.8 * sc, z), q, scl);
+      trunks.setMatrixAt(t++, m);
+      // Mostly pines close in, like a cedar forest; more broadleaf further out.
+      if (hash(i, 6) > (big ? 0.3 : 0.15)) {
+        m.compose(pos.set(x, y + 3.4 * sc, z), q, scl);
+        pines.setColorAt(p, pick(PINE, hash(i, 13), hash(i, 14)));
+        pines.setMatrixAt(p++, m);
+      } else {
+        m.compose(pos.set(x, y + 3 * sc, z), q, scl);
+        rounds.setColorAt(r, pick(LEAF, hash(i, 13), hash(i, 14)));
+        rounds.setMatrixAt(r++, m);
+      }
+    }
+    trunks.count = t;
+    pines.count = p;
+    rounds.count = r;
+    for (const im of [trunks, pines, rounds]) {
+      if (!im.count) continue;
+      im.castShadow = true;
+      im.receiveShadow = true;
+      im.computeBoundingSphere();
+      group.add(im);
     }
   }
-  trunks.count = t;
-  pines.count = p;
-  rounds.count = r;
-  for (const im of [trunks, pines, rounds]) {
-    im.castShadow = true;
-    im.receiveShadow = true;
-  }
-  group.add(trunks, pines, rounds);
   return group;
 }
 
