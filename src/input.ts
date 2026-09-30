@@ -250,11 +250,14 @@ export class Input {
     const btn = (i: number) => pad?.buttons[i]?.pressed ?? false;
     const ax = pad?.axes[0] ?? 0;
     const ay = pad?.axes[1] ?? 0;
+    // The stick only counts along its main axis, so a slightly diagonal push right
+    // doesn't also move down a row.
+    const vert = Math.abs(ay) > Math.abs(ax);
     const dirs = {
-      up: btn(B.dpadUp) || ay < -0.6,
-      down: btn(B.dpadDown) || ay > 0.6,
-      left: btn(B.dpadLeft) || ax < -0.6,
-      right: btn(B.dpadRight) || ax > 0.6,
+      up: btn(B.dpadUp) || (vert && ay < -0.6),
+      down: btn(B.dpadDown) || (vert && ay > 0.6),
+      left: btn(B.dpadLeft) || (!vert && ax < -0.6),
+      right: btn(B.dpadRight) || (!vert && ax > 0.6),
     };
     const repeat = (name: keyof typeof dirs) => {
       if (!dirs[name]) {

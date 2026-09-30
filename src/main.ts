@@ -9,7 +9,8 @@ import { Haptics } from './haptics';
 import { EngineAudio } from './audio';
 import { buildCockpit, shifterPose } from './cockpit';
 import { drawCluster, drawSpeedo, gearLabel } from './gauges';
-import { generateTouge, roadPoint } from './track/touge';
+import { roadPoint } from './track/touge';
+import { MAPS, roadFor } from './track/maps';
 import { buildScenery, SUN_DIR, updateTreeDetail } from './track/scenery';
 import { DayCycle } from './track/daylight';
 import { Graphics, bakeEnvironment } from './graphics';
@@ -23,12 +24,14 @@ import { Showroom } from './ui/showroom';
 import { buildCarModel } from './ui/carModel';
 
 const SIM_DT = 0.001;
+const SKIP_TITLE = 'upshift.skipTitle';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 document.getElementById('app')!.appendChild(renderer.domElement);
 
+const progress = loadProgress();
 const scene = new THREE.Scene();
-const road = generateTouge();
+const road = roadFor(progress.settings.map);
 const scenery = buildScenery(scene, road);
 const graphics = new Graphics(renderer, scene, scenery.sun, SUN_DIR);
 const day = new DayCycle(scenery.day);
@@ -46,7 +49,6 @@ function updateDay(dt: number) {
 }
 const showroom = new Showroom();
 
-const progress = loadProgress();
 let model = carById(progress.car);
 let cockpit = buildCockpit(model.interior);
 scene.add(cockpit.root);
@@ -146,6 +148,17 @@ const menus = new Menus(progress, {
     },
   }),
   settingsChanged: () => applySettings(),
+  mapChanged: () => {
+    // Each road builds its own world, so the simplest clean switch is a fresh page load
+    // that comes straight back to the menu.
+    saveProgress(progress);
+    try {
+      sessionStorage.setItem(SKIP_TITLE, '1');
+    } catch {
+      // No session storage: the title screen shows again, which is fine.
+    }
+    location.reload();
+  },
   preview: (m, paint) => {
     if (m && paint) {
       if (previewKey !== m.id) showroom.show(m.body, paint);
@@ -155,6 +168,23 @@ const menus = new Menus(progress, {
   },
 });
 let previewKey = '';
+// Back from a map change: skip the title and land on the main menu.
+{
+  let skip = false;
+  try {
+    skip = sessionStorage.getItem(SKIP_TITLE) === '1';
+    sessionStorage.removeItem(SKIP_TITLE);
+  } catch {
+    // ignore
+  }
+  if (skip) {
+    menus.open('main');
+    // Sound can only start after a click or key press.
+    const wake = () => audio.start();
+    window.addEventListener('pointerdown', wake, { once: true });
+    window.addEventListener('keydown', wake, { once: true });
+  }
+}
 
 // Garage camera: drag anywhere outside the menu panel to turn and tilt, scroll to zoom.
 {
@@ -222,6 +252,9 @@ function applySettings() {
   updateHint();
   haptics.strength = st.rumble;
   audio.setVolume(st.volume);
+  graphics.setRetro(st.retro);
+  document.body.classList.toggle('retro-vhs', st.retro === 'vhs');
+  document.body.classList.toggle('retro-console', st.retro === 'console');
   if (st.graphics !== graphics.quality || !graphicsReady) {
     graphics.setQuality(st.graphics);
     graphicsReady = true;
@@ -549,6 +582,7 @@ function cashOut() {
   progress.creds += earned;
   progress.runs += 1;
   progress.bestScore = Math.max(progress.bestScore, score);
+  recordMapBest(score);
   saveProgress(progress);
   cashoutEl.innerHTML = `<span class="co-label">Cashed out</span><span class="co-score">${score.toLocaleString()} pts</span><b class="co-creds">◆ +0</b>`;
   cashoutEl.classList.remove('hidden', 'leave');
@@ -575,13 +609,44 @@ function finishRun() {
   run = 'finished';
   const stats = { ...scorer.stats };
   const earned = credsForRun(stats);
-  const best = stats.score > progress.bestScore;
+  const best = stats.score > (progress.bestByMap[progress.settings.map] ?? 0);
   progress.creds += earned;
   progress.runs += 1;
   progress.bestScore = Math.max(progress.bestScore, stats.score);
+  recordMapBest(stats.score);
   saveProgress(progress);
   haptics.stop(input.gamepad());
   menus.showSummary(stats, earned, best, formatTime(runTime));
+}
+
+function recordMapBest(score: number) {
+  const id = progress.settings.map;
+  progress.bestByMap[id] = Math.max(progress.bestByMap[id] ?? 0, score);
+}
+
+// The VHS filter's camcorder date stamp: today's date, but in 1997.
+{
+  const el = document.querySelector<HTMLElement>('.osd-date');
+  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  const two = (n: number) => String(n).padStart(2, '0');
+  const tick = () => {
+    const d = new Date();
+    if (el) el.textContent = `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}\n${months[d.getMonth()]}. ${two(d.getDate())} 1997`;
+  };
+  tick();
+  setInterval(tick, 1000);
+}
+
+// Lay out the other roads while you sit in the menus, so the map picker opens instantly
+// (never mid-run, where it would cost a dropped frame).
+{
+  const rest = MAPS.map((m) => m.id).filter((id) => id !== progress.settings.map);
+  const next = () => {
+    if (!rest.length) return;
+    if (menus.isOpen) roadFor(rest.shift()!);
+    setTimeout(next, 400);
+  };
+  setTimeout(next, 4000);
 }
 
 function formatTime(t: number) {

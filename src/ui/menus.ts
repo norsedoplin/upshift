@@ -15,16 +15,17 @@ import {
   type PadInput,
 } from '../bindings';
 import type { Progress, Settings } from '../game/progress';
-import { GRAPHICS_QUALITIES, SPEEDO_MODES, TIMES_OF_DAY, saveProgress } from '../game/progress';
+import { GRAPHICS_QUALITIES, RETRO_LOOKS, SPEEDO_MODES, TIMES_OF_DAY, saveProgress } from '../game/progress';
+import { MAPS, mapById, mapStats, outlinePath, roadFor } from '../track/maps';
 import { chooseCar, choosePaint, ownsCar, ownsPaint, paintFor } from '../game/shop';
 import type { RunStats } from '../game/scoring';
 
 const SETTINGS_TABS = ['Controller', 'View', 'Game'] as const;
 
-export type Screen = 'title' | 'main' | 'garage' | 'settings' | 'controls' | 'pause' | 'summary' | 'help';
+export type Screen = 'title' | 'main' | 'garage' | 'settings' | 'controls' | 'pause' | 'summary' | 'help' | 'maps';
 
 /** Screens with the navigation bar across the top. */
-const NAV_SCREENS: Screen[] = ['main', 'garage', 'settings', 'controls', 'help'];
+const NAV_SCREENS: Screen[] = ['main', 'garage', 'settings', 'controls', 'help', 'maps'];
 const TIME_LABELS = ['Day cycle', 'Morning', 'Noon', 'Sunset', 'Night'];
 
 interface Item {
@@ -45,6 +46,7 @@ export interface MenuHooks {
   toMenu(): void;
   carChanged(): void;
   settingsChanged(): void;
+  mapChanged(): void; // a different road was picked; the world has to be rebuilt
   preview(car: CarModel | null, paint: string | null): void; // garage showroom
   testRumble(): Promise<string>;
   startCapture(kind: 'pad' | 'key'): void;
@@ -75,6 +77,10 @@ export class Menus {
   private capturing: { action: Action; kind: 'pad' | 'key' } | null = null;
   // Swallow input for one frame after a screen change, so one press can't act twice.
   private settle = false;
+  // Where the mouse last really was. Redrawing a screen puts new rows under a resting
+  // pointer and the browser fires hover events for them; those mustn't steal focus.
+  private mouseAt = { x: NaN, y: NaN };
+  private mouseMoved = false;
 
   constructor(
     private progress: Progress,
@@ -97,6 +103,11 @@ export class Menus {
     window.addEventListener('keydown', (e) => {
       if (this.screen === 'title' && !e.repeat) begin();
     });
+    window.addEventListener('mousemove', (e) => {
+      if (e.screenX === this.mouseAt.x && e.screenY === this.mouseAt.y) return;
+      this.mouseAt = { x: e.screenX, y: e.screenY };
+      this.mouseMoved = true;
+    }, true); // capture, so this runs before the rows' own handlers
   }
 
   get isOpen() {
@@ -186,6 +197,9 @@ export class Menus {
       case 'help':
         this.open('main');
         break;
+      case 'maps':
+        this.open('main');
+        break;
       default:
         break;
     }
@@ -231,7 +245,11 @@ export class Menus {
     const item: Item = { el, row, col, ...opts };
     const index = this.items.length;
     this.items.push(item);
-    el.addEventListener('mouseenter', () => this.setFocus(index));
+    el.addEventListener('mousemove', () => {
+      // Only a pointer that has actually moved picks the row under it.
+      if (!this.mouseMoved || this.focusIndex === index) return;
+      this.setFocus(index);
+    });
     el.addEventListener('click', (e) => {
       e.stopPropagation();
       this.setFocus(index);
@@ -247,6 +265,7 @@ export class Menus {
   }
 
   render() {
+    this.mouseMoved = false;
     this.root.innerHTML = '';
     this.items = [];
     this.root.className = this.screen ? `screen-${this.screen}` : 'hidden';
@@ -278,6 +297,9 @@ export class Menus {
       case 'help':
         this.renderHelp(panel);
         break;
+      case 'maps':
+        this.renderMaps(panel);
+        break;
     }
     // The bar's items go in last so each screen's own items keep their indices.
     if (NAV_SCREENS.includes(this.screen)) this.root.prepend(this.navBar());
@@ -308,7 +330,7 @@ export class Menus {
       ['Garage', 'garage'],
       ['Settings', 'settings'],
     ];
-    const active = this.screen === 'controls' ? 'settings' : this.screen === 'help' ? 'main' : this.screen;
+    const active = this.screen === 'controls' ? 'settings' : this.screen === 'help' || this.screen === 'maps' ? 'main' : this.screen;
     sections.forEach(([label, screen], i) => {
       const t = h('div', `menu-btn nav-tab${screen === active ? ' active' : ''}`, label);
       this.add(t, -1, i, { confirm: () => screen !== this.screen && this.open(screen) });
@@ -346,17 +368,11 @@ export class Menus {
 
     const grid = h('div', 'hub-grid');
     // Items are added in focus order: the hero first, so it's where the cursor starts.
-    const hero = this.tile(
-      'hero',
-      'Touge run',
-      'Drive the touge',
-      '4.4 km downhill, hairpins and all. Pull into a lot any time to take a breather.',
-      0,
-      1,
-      { confirm: () => this.hooks.drive() },
-      "Let's drive  ›",
-    );
+    const map = mapById(st.map);
+    const hero = this.tile('hero', 'Touge run', map.name, map.blurb, 0, 1, { confirm: () => this.hooks.drive() }, "Let's drive  ›");
     hero.prepend(h('div', 'hero-art'));
+    const mapTile = this.tile('map', 'Map', 'Pick a road', `${MAPS.length} roads · ${map.name} now`, 0, 2, { confirm: () => this.open('maps') }, 'Choose  ›');
+    mapTile.prepend(this.mapOutline(map.id, 'map-art'));
 
     const ride = h('div', 'menu-btn tile ride');
     ride.append(h('span', 'tile-label', 'Your ride'), h('canvas', 'ride-view'));
@@ -381,7 +397,7 @@ export class Menus {
     });
     const controls = this.tile('controls', 'Controls', 'Buttons and keys', 'Rebind anything', 2, 1, { confirm: () => this.open('controls'), left: toRide });
     const help = this.tile('help', 'Lessons', 'How to drive stick', 'Bite point, rev-matching, heel-toe', 2, 2, { confirm: () => this.open('help') });
-    grid.append(ride, hero, garage, time, controls, help);
+    grid.append(ride, hero, mapTile, garage, time, controls, help);
 
     const foot = h('div', 'hub-foot');
     foot.append(
@@ -427,6 +443,65 @@ export class Menus {
     const back = h('div', 'menu-list');
     back.append(this.button('Back', 0, () => this.back()));
     panel.append(list, back);
+  }
+
+  /** The road seen from above, start marked in lime and the finish in white. */
+  private mapOutline(id: string, cls: string) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('class', cls);
+    const o = outlinePath(roadFor(id), 100);
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', o.d);
+    const dot = (p: number[], c: string) => {
+      const e = document.createElementNS(svgNS, 'circle');
+      e.setAttribute('cx', String(p[0]));
+      e.setAttribute('cy', String(p[1]));
+      e.setAttribute('r', '3');
+      e.setAttribute('class', c);
+      return e;
+    };
+    svg.append(path, dot(o.end, 'finish'), dot(o.start, 'start'));
+    return svg;
+  }
+
+  private renderMaps(panel: HTMLElement) {
+    const st = this.progress.settings;
+    panel.append(h('h2', undefined, 'Pick a road'));
+    const list = h('div', 'map-list');
+    MAPS.forEach((m, i) => {
+      const road = roadFor(m.id);
+      const s = mapStats(road);
+      const here = m.id === st.map;
+      const card = h('div', `menu-btn map-card${here ? ' current' : ''}`);
+      const text = h('div', 'map-text');
+      const best = this.progress.bestByMap[m.id];
+      text.append(
+        h('b', undefined, m.name),
+        h('p', undefined, m.blurb),
+        h('span', 'map-stats', `${s.km.toFixed(1)} km · ${Math.abs(Math.round(s.rise))} m ${s.rise > 0 ? 'climb' : 'drop'} · ${s.hairpins} hairpins`),
+        h('span', 'map-best', best ? `Best ${best.toLocaleString()}` : 'Not driven yet'),
+      );
+      card.append(this.mapOutline(m.id, 'map-thumb'), text, h('span', 'map-badge', here ? 'Selected' : 'Pick'));
+      this.add(card, Math.floor(i / 2), i % 2, {
+        confirm: () => {
+          if (here) return this.open('main');
+          st.map = m.id;
+          saveProgress(this.progress);
+          card.querySelector('.map-badge')!.textContent = 'Loading…';
+          // Let the label paint before the page reloads.
+          setTimeout(() => this.hooks.mapChanged(), 30);
+        },
+      });
+      list.append(card);
+    });
+    const back = h('div', 'menu-list');
+    back.append(this.button('Back', Math.ceil(MAPS.length / 2), () => this.back()));
+    panel.append(list, back);
+    // Start on the road you're on.
+    const cur = MAPS.findIndex((m) => m.id === st.map);
+    if (cur >= 0) this.focusIndex = cur;
   }
 
   private renderSummary(panel: HTMLElement) {
@@ -544,6 +619,7 @@ export class Menus {
       option('Field of view', row++, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
       option('On-screen speedo', row++, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
       option('Speed effects', row++, ['On', 'Off'], st.speedFx ? 0 : 1, (i) => (st.speedFx = i === 0));
+      option('90s filter', row++, ['Off', 'VHS tape', '32-bit console'], RETRO_LOOKS.indexOf(st.retro), (i) => (st.retro = RETRO_LOOKS[i]));
       option('Time of day', row++, ['Day cycle', 'Morning', 'Noon', 'Sunset', 'Night'], TIMES_OF_DAY.indexOf(st.timeOfDay), (i) => (st.timeOfDay = TIMES_OF_DAY[i]));
       option('Graphics', row++, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
     } else {
