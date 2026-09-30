@@ -30,6 +30,7 @@ export interface MenuHooks {
   settingsChanged(): void;
   preview(car: CarModel | null, paint: string | null): void; // garage showroom
   testRumble(): Promise<string>;
+  dualSense(): { supported: boolean; label: string; connect(): Promise<string> };
 }
 
 const h = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) => {
@@ -330,16 +331,31 @@ export class Menus {
       },
     });
     list.append(test);
-    option('Volume', 2, pctLabels, nearest(st.volume), (i) => (st.volume = pct[i]));
-    option('Speed units', 3, ['km/h', 'mph'], st.units === 'kmh' ? 0 : 1, (i) => (st.units = i === 0 ? 'kmh' : 'mph'));
+    let row = 2;
+    const ds = this.hooks.dualSense();
+    if (ds.supported) {
+      // Chrome often can't rumble a DualSense through the Gamepad API, so offer a direct link.
+      const link = h('div', 'menu-btn setting');
+      const state = h('span', 'value', ds.label);
+      link.append(h('span', undefined, 'DualSense rumble'), state);
+      this.add(link, row++, 0, {
+        confirm: () => {
+          state.textContent = '…';
+          void ds.connect().then((msg) => (state.textContent = msg));
+        },
+      });
+      list.append(link);
+    }
+    option('Volume', row++, pctLabels, nearest(st.volume), (i) => (st.volume = pct[i]));
+    option('Speed units', row++, ['km/h', 'mph'], st.units === 'kmh' ? 0 : 1, (i) => (st.units = i === 0 ? 'kmh' : 'mph'));
     const views: Settings['camera'][] = ['cockpit', 'hood', 'chase'];
-    option('Camera', 4, ['Cockpit', 'Hood', 'Chase'], views.indexOf(st.camera), (i) => (st.camera = views[i]));
+    option('Camera', row++, ['Cockpit', 'Hood', 'Chase'], views.indexOf(st.camera), (i) => (st.camera = views[i]));
     const fovs = Array.from({ length: 11 }, (_, i) => 50 + i * 5);
-    option('Field of view', 5, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
-    option('Graphics', 6, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
-    option('On-screen speedo', 7, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
-    option('Control hints', 8, ['On', 'Off'], st.hints ? 0 : 1, (i) => (st.hints = i === 0));
-    list.append(this.button('Back', 9, () => this.back()));
+    option('Field of view', row++, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
+    option('Graphics', row++, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
+    option('On-screen speedo', row++, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
+    option('Control hints', row++, ['On', 'Off'], st.hints ? 0 : 1, (i) => (st.hints = i === 0));
+    list.append(this.button('Back', row++, () => this.back()));
     panel.append(list, this.controlsHint());
   }
 
