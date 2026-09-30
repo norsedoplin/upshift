@@ -48,7 +48,7 @@ function shift(car: Car, sc: Scorer, gear: number, opts: { release: number; blip
     sc,
     2,
     (t) => ({
-      throttle: t < 0.25 ? 0 : t < 0.45 ? opts.blip ?? 0 : 0,
+      throttle: t < 0.25 ? 0 : t < 0.5 ? opts.blip ?? 0 : 0,
       brake: opts.brake ?? 0,
       clutch: t < 0.25 ? 1 : Math.max(0, 1 - (t - 0.45) / opts.release),
     }),

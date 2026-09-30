@@ -196,33 +196,71 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   box(0.2, 0.012, 0.2, interiorLight, 0.02, 0.625, -0.38);
 
   // ---- Steering wheel ----
+  // Every car gets an aftermarket three-spoke deep-dish wheel: a fat suede rim, black
+  // slotted spokes that dip forward to a recessed hub, and a stripe at twelve o'clock.
   const wheel = new THREE.Group();
-  const radius = spec.wheel === 'dish' ? 0.17 : spec.wheel === 'four' ? 0.19 : 0.185;
-  const grip = spec.wheel === 'dish' ? 0.021 : 0.018;
-  wheel.add(new THREE.Mesh(new THREE.TorusGeometry(radius, grip, 10, 44), interior));
-  const spokeMat = spec.wheel === 'dish' ? metal : interiorLight;
-  const spokeAngles =
-    spec.wheel === 'four' ? [Math.PI * 0.2, Math.PI * 0.8, Math.PI * 1.3, Math.PI * 1.7] : [0, (2 * Math.PI) / 3, (4 * Math.PI) / 3].map((a) => a - Math.PI / 2);
-  for (const a of spokeAngles) {
-    const len = radius * 0.9;
-    const spoke = new THREE.Mesh(new THREE.BoxGeometry(len, 0.024, 0.015), spokeMat);
-    spoke.position.set(Math.cos(a) * len * 0.5, Math.sin(a) * len * 0.5, spec.wheel === 'dish' ? 0.03 : 0);
-    spoke.rotation.z = a;
-    wheel.add(spoke);
+  const radius = 0.175;
+  const grip = 0.022;
+  const dish = 0.075; // how far the hub sits behind the rim
+  const suede = mat('#18191b', undefined, 1);
+  const anodised = mat('#1f2023', undefined, 0.35, 0.6);
+  const yellow = mat('#f2c230', undefined, 0.8);
+  wheel.add(new THREE.Mesh(new THREE.TorusGeometry(radius, grip, 14, 64), suede));
+  // Spokes: tapered plates with a slot, extruded thin and angled from the hub up to the rim.
+  const hubR = 0.04;
+  const spokeShape = (len: number) => {
+    const w0 = 0.021; // half width at the hub
+    const w1 = 0.014; // half width at the rim
+    const sh = new THREE.Shape();
+    sh.moveTo(0, -w0);
+    sh.lineTo(len, -w1);
+    sh.lineTo(len, w1);
+    sh.lineTo(0, w0);
+    sh.closePath();
+    const slot = new THREE.Path();
+    const a = len * 0.35;
+    const b = len * 0.7;
+    const r = 0.005;
+    slot.absarc(a, 0, r, Math.PI / 2, (Math.PI * 3) / 2, false);
+    slot.absarc(b, 0, r, -Math.PI / 2, Math.PI / 2, false);
+    slot.closePath();
+    sh.holes.push(slot);
+    return new THREE.ExtrudeGeometry(sh, { depth: 0.006, bevelEnabled: true, bevelThickness: 0.0015, bevelSize: 0.0015, bevelSegments: 1, curveSegments: 6 }).translate(0, 0, -0.003);
+  };
+  // Two spokes a touch below horizontal and one straight down, like the classic race wheels.
+  const tilt = (8 * Math.PI) / 180;
+  for (const a of [-tilt, Math.PI + tilt, -Math.PI / 2]) {
+    const inner = hubR * 0.8;
+    const outer = radius - grip * 0.4;
+    const dr = outer - inner;
+    const len = Math.hypot(dr, dish);
+    const arm = new THREE.Group();
+    arm.rotation.z = a;
+    const spoke = new THREE.Mesh(spokeShape(len), anodised);
+    spoke.position.set(inner, 0, -dish);
+    spoke.rotation.y = -Math.atan2(dish, dr);
+    arm.add(spoke);
+    wheel.add(arm);
   }
-  const hubR = spec.wheel === 'four' ? 0.06 : 0.045;
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(hubR, hubR, 0.035, 10).rotateX(Math.PI / 2), interiorLight);
-  hub.position.z = spec.wheel === 'dish' ? 0.04 : 0.005;
+  // Recessed hub with six bolts and a round horn button.
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(hubR, hubR, 0.02, 24).rotateX(Math.PI / 2), anodised);
+  hub.position.z = -dish;
   wheel.add(hub);
-  if (spec.wheel === 'dish') {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.006, 4, 12), accent);
-    ring.position.z = 0.058;
-    wheel.add(ring);
+  const bolt = new THREE.CylinderGeometry(0.0035, 0.0035, 0.004, 8).rotateX(Math.PI / 2);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+    add(bolt.clone(), dark, Math.cos(a) * hubR * 0.8, Math.sin(a) * hubR * 0.8, -dish + 0.011, 0, 0, 0, wheel);
   }
-  // Top-centre marker so you can see how far the wheel is turned.
-  const marker = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.012, grip * 2.2), spec.wheel === 'four' ? accent : mat(spec.cage ? '#e8e6df' : spec.accent));
-  marker.position.y = radius;
-  wheel.add(marker);
+  bolt.dispose();
+  const horn = new THREE.Mesh(new THREE.SphereGeometry(0.027, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 1, 0.35).rotateX(Math.PI / 2), mat('#0c0c0d', undefined, 0.15, 0.2));
+  horn.position.z = -dish + 0.01;
+  wheel.add(horn);
+  const hornRing = new THREE.Mesh(new THREE.TorusGeometry(0.027, 0.0022, 6, 32), yellow);
+  hornRing.position.z = -dish + 0.011;
+  wheel.add(hornRing);
+  // Twelve o'clock stripe so you can see how far the wheel is turned.
+  const stripe = new THREE.Mesh(new THREE.TorusGeometry(radius, grip * 1.04, 14, 6, 0.1).rotateZ(Math.PI / 2 - 0.05), yellow);
+  wheel.add(stripe);
   const wheelMount = new THREE.Group();
   wheelMount.position.set(-0.37, 0.76, -0.4);
   wheelMount.rotation.x = -0.45;

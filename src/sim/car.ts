@@ -58,7 +58,7 @@ export const HATCHBACK: CarSpec = {
   stallRpm: 380,
   clutchMaxTorque: 260,
   biteStart: 0.32,
-  biteEnd: 0.78,
+  biteEnd: 0.84,
   starterTorque: 48,
 };
 
@@ -145,7 +145,9 @@ export class Car {
     const s = this.spec;
     const e = 1 - pedal;
     const x = Math.min(1, Math.max(0, (e - s.biteStart) / (s.biteEnd - s.biteStart)));
-    return s.clutchMaxTorque * x * x;
+    // A progressive curve: most of the travel is spent in the gentle, low-torque part of the
+    // bite, so the clutch takes up smoothly instead of grabbing.
+    return s.clutchMaxTorque * Math.pow(x, 2.6);
   }
 
   /** Press the starter. It keeps cranking until the engine catches or gives up. */

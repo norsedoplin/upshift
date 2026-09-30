@@ -276,6 +276,50 @@ export class EngineAudio {
     n.connect(f).connect(g).connect(this.master);
     n.start(t0);
     n.stop(t0 + 0.5);
+    this.flutter(strength);
+  }
+
+  /**
+   * Compressor surge ("stu-tu-tu-tu"): with the throttle shut, trapped boost chatters back
+   * through the turbo in a quick train of chuffs that slows and fades as the pressure goes.
+   */
+  flutter(strength: number) {
+    const ctx = this.ctx;
+    if (!ctx || this.muted || strength < 0.25) return;
+    const t0 = ctx.currentTime + 0.015;
+    const n = makeNoise(ctx);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 2.2;
+    f.frequency.setValueAtTime(1100, t0);
+    f.frequency.exponentialRampToValueAtTime(600, t0 + 0.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    // Each chuff is a sharp rise and a quick fall; they spread out as the pressure drops.
+    const chuffs = 4 + Math.round(strength * 4);
+    let t = t0;
+    let gap = 0.042;
+    for (let i = 0; i < chuffs; i++) {
+      const amp = 0.2 * strength * Math.pow(0.8, i);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(amp, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + gap * 0.85);
+      t += gap;
+      gap *= 1.1;
+    }
+    // A low flutter thump under the hiss, from the compressor wheel stalling.
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(95, t0);
+    o.frequency.exponentialRampToValueAtTime(60, t);
+    const og = ctx.createGain();
+    og.gain.value = 0.9;
+    o.connect(og).connect(g);
+    n.connect(f).connect(g).connect(this.master);
+    n.start(t0);
+    o.start(t0);
+    n.stop(t + 0.05);
+    o.stop(t + 0.05);
   }
 
   setMuted(m: boolean) {

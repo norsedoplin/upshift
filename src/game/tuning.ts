@@ -96,7 +96,7 @@ export function tunedSpec(spec: CarSpec, t: Tune): CarSpec {
   const torqueK = [1, 1.05, 1.1][ecu] * [1, 1.03, 1.06][ex];
   const bite = spec.biteEnd - spec.biteStart;
   const mid = (spec.biteEnd + spec.biteStart) / 2;
-  const biteK = [1, 0.8, 0.58][cl];
+  const biteK = [1, 0.88, 0.74][cl];
   return {
     ...spec,
     torqueCurve: spec.torqueCurve.map(([r, tq]) => [r, tq * torqueK] as [number, number]),
