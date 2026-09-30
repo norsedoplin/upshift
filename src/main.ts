@@ -119,6 +119,28 @@ const menus = new Menus(progress, {
   },
 });
 let previewKey = '';
+
+// Garage camera: drag anywhere outside the menu panel to turn and tilt, scroll to zoom.
+{
+  let drag: { x: number; y: number } | null = null;
+  const inGarage = (e: Event) => menus.screen === 'garage' && !(e.target as HTMLElement | null)?.closest?.('.menu-panel');
+  window.addEventListener('pointerdown', (e) => {
+    if (inGarage(e)) drag = { x: e.clientX, y: e.clientY };
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!drag || menus.screen !== 'garage') return;
+    showroom.orbit((e.clientX - drag.x) * 0.008, (e.clientY - drag.y) * 0.005);
+    drag = { x: e.clientX, y: e.clientY };
+  });
+  window.addEventListener('pointerup', () => (drag = null));
+  window.addEventListener(
+    'wheel',
+    (e) => {
+      if (inGarage(e)) showroom.orbit(0, 0, -e.deltaY * 0.001);
+    },
+    { passive: true },
+  );
+}
 $('loading').remove();
 
 /** Swap in the selected car (physics, sound, paint) and put it on the start line. */
@@ -268,6 +290,7 @@ function frame(now: number) {
     simAccumulator = 0;
     haptics.update(dt, car, null);
     if (menus.screen === 'garage') {
+      showroom.control(pad, dt);
       showroom.render(renderer, dt, window.innerWidth / window.innerHeight);
     } else {
       graphics.render(camera);

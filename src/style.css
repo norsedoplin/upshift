@@ -614,3 +614,31 @@ dl.stats dd {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* Section tabs at the top of Settings. */
+.tab-strip {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.menu-btn.tab {
+  flex: 1;
+  justify-content: center;
+  padding: 8px 10px;
+  font-size: 14px;
+  color: var(--muted);
+  background: transparent;
+}
+.menu-btn.tab.active {
+  color: #16171b;
+  background: var(--accent);
+}
+.menu-btn.tab.focus {
+  transform: none;
+}
+.menu-btn.tab.active.focus {
+  background: #ff915e;
+}
