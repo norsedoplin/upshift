@@ -47,7 +47,7 @@ export class Haptics {
 
     // Friction power in the clutch: highest right at the bite point while slipping.
     const slipPower = Math.abs(car.clutchTorque * (car.engineOmega - car.outputOmega));
-    let bite = Math.min(1, slipPower / 9000) ** 0.6;
+    let bite = Math.min(1, slipPower / 7000) ** 0.5;
     // Clutch judder: a low shudder rather than a flat hum.
     bite *= 0.75 + 0.25 * Math.sin(this.t * 2 * Math.PI * 11);
 
@@ -59,12 +59,12 @@ export class Haptics {
         : 0;
 
     // Subtle idle buzz so a running engine is felt; much quieter than the bite.
-    const idle = car.running ? 0.03 + (rpm / 7000) * 0.1 : car.cranking ? 0.25 : 0;
+    const idle = car.running ? 0.012 + (rpm / 7000) * 0.04 : car.cranking ? 0.2 : 0;
 
-    this.strong = clamp01(bite * 0.85 + lug * 0.6 + this.impulse);
+    this.strong = clamp01(bite + lug * 0.4 + this.impulse);
     // Tyres near and past their grip limit: a fine buzz you can drive by.
     const scrub = Math.max(0, Math.min(1, (tyreSlip - 0.08) / 0.2)) * (0.6 + 0.4 * Math.sin(this.t * 2 * Math.PI * 23));
-    this.weak = clamp01(idle + bite * 0.3 + this.buzz * 0.9 + lug * 0.2 + scrub * 0.45);
+    this.weak = clamp01(idle + bite * 0.35 + this.buzz * 0.9 + lug * 0.12 + scrub * 0.22);
 
     if (this.dualsense.connected) {
       if (performance.now() < this.testUntil) return;
