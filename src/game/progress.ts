@@ -6,7 +6,12 @@ export interface Settings {
   volume: number; // 0..1
   units: 'kmh' | 'mph';
   hints: boolean;
+  camera: CameraView;
+  fov: number; // degrees, horizontal screens; portrait screens add 20
 }
+
+export type CameraView = 'cockpit' | 'hood' | 'chase';
+export const CAMERA_VIEWS: CameraView[] = ['cockpit', 'hood', 'chase'];
 
 export interface Progress {
   creds: number;
@@ -22,7 +27,7 @@ export interface Progress {
 
 const KEY = 'upshift.progress.v1';
 
-export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true };
+export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60 };
 
 export function defaultProgress(): Progress {
   return {
@@ -77,6 +82,8 @@ export function parseProgress(raw: string | null): Progress {
       volume: Math.min(1, Math.max(0, num(st.volume, DEFAULT_SETTINGS.volume))),
       units: st.units === 'mph' ? 'mph' : 'kmh',
       hints: typeof st.hints === 'boolean' ? st.hints : true,
+      camera: CAMERA_VIEWS.includes(st.camera) ? st.camera : DEFAULT_SETTINGS.camera,
+      fov: Math.round(Math.min(100, Math.max(50, num(st.fov, DEFAULT_SETTINGS.fov))) / 5) * 5,
     };
   } catch {
     // Corrupt data: start fresh rather than crash.

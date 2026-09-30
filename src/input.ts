@@ -13,6 +13,7 @@ export interface Controls {
   reset: boolean;
   toggleDebug: boolean;
   pause: boolean;
+  cycleCamera: boolean;
   source: 'gamepad' | 'keyboard';
 }
 
@@ -118,6 +119,7 @@ export class Input {
       reset: edge('KeyR'),
       toggleDebug: edge('Backquote') || edge('F2'),
       pause: edge('Escape') || edge('KeyP'),
+      cycleCamera: edge('KeyC'),
       source: 'keyboard',
     };
     const anyKey = this.keys.size > 0 || this.pressedKeys.size > 0;
@@ -146,6 +148,7 @@ export class Input {
         c.ignition ||= pressed(B.triangle);
         c.pause ||= pressed(B.options);
         c.toggleDebug ||= pressed(B.dpadUp);
+        c.cycleCamera ||= pressed(B.dpadDown);
         if (padActive) this.lastSource = 'gamepad';
       }
       this.prevButtons = pad.buttons.map((b) => b.pressed);

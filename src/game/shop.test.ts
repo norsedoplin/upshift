@@ -27,6 +27,15 @@ describe('progress', () => {
     expect(p.car).toBe('hatch'); // not owned
     expect(p.settings.units).toBe('kmh');
     expect(p.settings.rumble).toBe(1);
+    expect(p.settings.camera).toBe('cockpit');
+    expect(p.settings.fov).toBe(60);
+  });
+
+  it('keeps camera settings in range', () => {
+    const p = parseProgress(JSON.stringify({ settings: { camera: 'drone', fov: 170 } }));
+    expect(p.settings.camera).toBe('cockpit');
+    expect(p.settings.fov).toBe(100);
+    expect(parseProgress(JSON.stringify({ settings: { camera: 'chase', fov: 73 } })).settings).toMatchObject({ camera: 'chase', fov: 75 });
   });
 });
 

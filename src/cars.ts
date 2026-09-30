@@ -17,6 +17,19 @@ export interface BodyShape {
   exhausts: 1 | 2;
 }
 
+/** What the driver sees from the seat. */
+export interface InteriorSpec {
+  seatDrop: number; // lower the whole cabin (and your eyes) relative to the hatch, m
+  hoodLength: number;
+  hoodBulge: boolean;
+  trim: string; // dash and panels
+  trimLight: string;
+  accent: string; // stitching, stripes, trim inlays
+  wheel: 'three' | 'dish' | 'four';
+  cage: boolean;
+  gaugePod: boolean; // extra gauges on the dash top
+}
+
 export interface CarModel {
   id: string;
   name: string;
@@ -25,6 +38,7 @@ export interface CarModel {
   spec: CarSpec;
   chassis: ChassisSpec;
   body: BodyShape;
+  interior: InteriorSpec;
   defaultPaint: string;
   cylinders: 4 | 6;
   stats: { power: number; weight: number; grip: number; drive: 'FWD' | 'RWD' };
@@ -57,6 +71,7 @@ const HATCH: CarModel = {
   spec: HATCHBACK,
   chassis: HATCHBACK_CHASSIS,
   body: { length: 3.9, width: 1.7, height: 0.72, cabinLength: 2.1, cabinHeight: 0.62, cabinOffset: 0.45, wheelRadius: 0.3, style: 'hatch', spoiler: 'roof', exhausts: 1 },
+  interior: { seatDrop: 0, hoodLength: 1.3, hoodBulge: false, trim: '#2b2d33', trimLight: '#3a3d45', accent: '#5a5e68', wheel: 'three', cage: false, gaugePod: false },
   defaultPaint: 'coral',
   cylinders: 4,
   stats: { power: 0.45, weight: 0.55, grip: 0.55, drive: 'FWD' },
@@ -96,6 +111,7 @@ const KITSUNE: CarModel = {
     drivenAxle: 'rear',
   },
   body: { length: 4.2, width: 1.63, height: 0.66, cabinLength: 1.9, cabinHeight: 0.56, cabinOffset: 0.2, wheelRadius: 0.29, style: 'coupe', spoiler: 'ducktail', exhausts: 1 },
+  interior: { seatDrop: 0.1, hoodLength: 1.75, hoodBulge: false, trim: '#222326', trimLight: '#303236', accent: '#c23b2e', wheel: 'dish', cage: true, gaugePod: false },
   defaultPaint: 'snow',
   cylinders: 4,
   stats: { power: 0.55, weight: 0.3, grip: 0.6, drive: 'RWD' },
@@ -138,6 +154,7 @@ const RONIN: CarModel = {
     drivenAxle: 'rear',
   },
   body: { length: 4.5, width: 1.8, height: 0.68, cabinLength: 2.0, cabinHeight: 0.58, cabinOffset: 0.3, wheelRadius: 0.33, style: 'sedan', spoiler: 'wing', flares: true, exhausts: 2 },
+  interior: { seatDrop: 0.05, hoodLength: 1.9, hoodBulge: true, trim: '#262320', trimLight: '#3d352d', accent: '#7a5634', wheel: 'four', cage: false, gaugePod: true },
   defaultPaint: 'midnight',
   cylinders: 6,
   stats: { power: 0.9, weight: 0.7, grip: 0.75, drive: 'RWD' },
