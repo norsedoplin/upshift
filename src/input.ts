@@ -12,7 +12,19 @@ export interface Controls {
   ignition: boolean;
   reset: boolean;
   toggleDebug: boolean;
+  pause: boolean;
   source: 'gamepad' | 'keyboard';
+}
+
+/** Menu navigation, edge-triggered with auto-repeat when held. */
+export interface MenuNav {
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+  confirm: boolean;
+  back: boolean;
+  pause: boolean;
 }
 
 const B = {
@@ -26,6 +38,9 @@ const B = {
   r2: 7,
   options: 9,
   dpadUp: 12,
+  dpadDown: 13,
+  dpadLeft: 14,
+  dpadRight: 15,
 } as const;
 
 function deadzone(v: number, dz: number) {
@@ -42,6 +57,9 @@ export class Input {
   private kbBrake = 0;
   private kbClutch = 0;
   private kbSteer = 0;
+  private menuKeys = new Set<string>();
+  private held: Record<string, number> = {};
+  private navPrev: boolean[] = [];
   gamepadIndex: number | null = null;
   lastSource: 'gamepad' | 'keyboard' = 'keyboard';
 
@@ -99,9 +117,11 @@ export class Input {
       ignition: edge('KeyI'),
       reset: edge('KeyR'),
       toggleDebug: edge('Backquote') || edge('F2'),
+      pause: edge('Escape') || edge('KeyP'),
       source: 'keyboard',
     };
     const anyKey = this.keys.size > 0 || this.pressedKeys.size > 0;
+    this.menuKeys = new Set(this.pressedKeys);
     this.pressedKeys.clear();
 
     const pad = this.gamepad();
@@ -124,7 +144,7 @@ export class Input {
         c.shiftUp ||= pressed(B.r1);
         c.shiftDown ||= pressed(B.l1);
         c.ignition ||= pressed(B.triangle);
-        c.reset ||= pressed(B.options);
+        c.pause ||= pressed(B.options);
         c.toggleDebug ||= pressed(B.dpadUp);
         if (padActive) this.lastSource = 'gamepad';
       }
@@ -133,5 +153,52 @@ export class Input {
     if (anyKey) this.lastSource = 'keyboard';
     c.source = this.lastSource;
     return c;
+  }
+
+  /**
+   * Menu navigation for this frame. Call after read(): it reuses the key presses and
+   * button states read there. Held directions repeat after a short delay.
+   */
+  nav(dt: number): MenuNav {
+    const k = (c: string) => this.menuKeys.has(c);
+    const pad = this.gamepad();
+    const btn = (i: number) => pad?.buttons[i]?.pressed ?? false;
+    const ax = pad?.axes[0] ?? 0;
+    const ay = pad?.axes[1] ?? 0;
+    const dirs = {
+      up: btn(B.dpadUp) || ay < -0.6,
+      down: btn(B.dpadDown) || ay > 0.6,
+      left: btn(B.dpadLeft) || ax < -0.6,
+      right: btn(B.dpadRight) || ax > 0.6,
+    };
+    const repeat = (name: keyof typeof dirs) => {
+      if (!dirs[name]) {
+        delete this.held[name];
+        return false;
+      }
+      const t = this.held[name];
+      if (t === undefined) {
+        this.held[name] = 0.35; // first repeat delay
+        return true;
+      }
+      this.held[name] = t - dt;
+      if (this.held[name] <= 0) {
+        this.held[name] = 0.12;
+        return true;
+      }
+      return false;
+    };
+    const edgeBtn = (i: number) => btn(i) && !this.navPrev[i];
+    const out: MenuNav = {
+      up: repeat('up') || k('ArrowUp') || k('KeyW'),
+      down: repeat('down') || k('ArrowDown') || k('KeyS'),
+      left: repeat('left') || k('ArrowLeft') || k('KeyA'),
+      right: repeat('right') || k('ArrowRight') || k('KeyD'),
+      confirm: edgeBtn(B.cross) || k('Enter') || k('Space'),
+      back: edgeBtn(B.circle) || k('Escape') || k('Backspace'),
+      pause: edgeBtn(B.options),
+    };
+    this.navPrev = pad ? pad.buttons.map((b) => b.pressed) : [];
+    return out;
   }
 }

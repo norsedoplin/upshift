@@ -23,6 +23,8 @@ export class EngineAudio {
   private squealFilter!: BiquadFilterNode;
   private squealGain!: GainNode;
   volume = 0.8;
+  private muted = false;
+  private cylinders: 4 | 6 = 4;
 
   start() {
     if (this.ctx) {
@@ -32,14 +34,13 @@ export class EngineAudio {
     const ctx = new AudioContext();
     this.ctx = ctx;
     this.master = ctx.createGain();
-    this.master.gain.value = this.volume;
+    this.master.gain.value = this.muted ? 0 : this.volume;
     const comp = ctx.createDynamicsCompressor();
     this.master.connect(comp).connect(ctx.destination);
 
     // Four-cylinder character: firing order (2nd crank harmonic) dominates, with
     // half-order content for the uneven, lumpy sound of real combustion.
-    const h = [0, 0.25, 1.0, 0.18, 0.55, 0.12, 0.35, 0.06, 0.22, 0.05, 0.12, 0.03, 0.08];
-    const wave = ctx.createPeriodicWave(new Float32Array(h.length), new Float32Array(h));
+    const wave = engineWave(ctx, this.cylinders);
     this.engineOsc = ctx.createOscillator();
     this.engineOsc.setPeriodicWave(wave);
     this.engineOsc2 = ctx.createOscillator();
@@ -161,8 +162,35 @@ export class EngineAudio {
   }
 
   setMuted(m: boolean) {
-    if (this.ctx) this.master.gain.value = m ? 0 : this.volume;
+    this.muted = m;
+    if (this.ctx) this.master.gain.setTargetAtTime(m ? 0 : this.volume, this.ctx.currentTime, 0.05);
   }
+
+  setVolume(v: number) {
+    this.volume = v;
+    this.setMuted(this.muted);
+  }
+
+  /** Change the engine's character (firing order) for a different car. */
+  setEngine(cylinders: 4 | 6) {
+    this.cylinders = cylinders;
+    if (!this.ctx) return;
+    const wave = engineWave(this.ctx, cylinders);
+    this.engineOsc.setPeriodicWave(wave);
+    this.engineOsc2.setPeriodicWave(wave);
+  }
+}
+
+/**
+ * Harmonics of crank rotation. A four fires twice per turn (2nd order dominates) with
+ * half-order roughness; a straight six fires three times per turn and sounds smoother.
+ */
+function engineWave(ctx: AudioContext, cylinders: 4 | 6) {
+  const h =
+    cylinders === 4
+      ? [0, 0.25, 1.0, 0.18, 0.55, 0.12, 0.35, 0.06, 0.22, 0.05, 0.12, 0.03, 0.08]
+      : [0, 0.12, 0.2, 1.0, 0.1, 0.15, 0.6, 0.05, 0.1, 0.32, 0.04, 0.06, 0.18];
+  return ctx.createPeriodicWave(new Float32Array(h.length), new Float32Array(h));
 }
 
 function makeNoise(ctx: AudioContext) {

@@ -6,7 +6,10 @@ export function gearLabel(g: number) {
   return g === 0 ? 'N' : g === -1 ? 'R' : String(g);
 }
 
-export function drawCluster(canvas: HTMLCanvasElement, car: Car, time: number) {
+export function drawCluster(canvas: HTMLCanvasElement, car: Car, time: number, units: 'kmh' | 'mph' = 'kmh') {
+  const speedFactor = units === 'mph' ? 2.23694 : 3.6;
+  const rpmMax = Math.ceil((car.spec.revLimit + 700) / 1000) * 1000;
+  const redline = car.spec.revLimit - 300;
   const ctx = canvas.getContext('2d')!;
   const W = canvas.width;
   const H = canvas.height;
@@ -63,8 +66,8 @@ export function drawCluster(canvas: HTMLCanvasElement, car: Car, time: number) {
     ctx.fill();
   };
 
-  dial(128, 104, 88, car.rpm, 8000, 8, 6500, 'RPM ×1000');
-  dial(384, 104, 88, Math.abs(car.speed) * 3.6, 200, 10, null, 'km/h');
+  dial(128, 104, 88, car.rpm, rpmMax, rpmMax / 1000, redline, 'RPM ×1000');
+  dial(384, 104, 88, Math.abs(car.speed) * speedFactor, units === 'mph' ? 140 : 220, units === 'mph' ? 14 : 11, null, units === 'mph' ? 'mph' : 'km/h');
 
   // Gear + digital speed in the middle.
   ctx.fillStyle = '#f4f1e8';
@@ -73,7 +76,7 @@ export function drawCluster(canvas: HTMLCanvasElement, car: Car, time: number) {
   ctx.fillText(gearLabel(car.gear), 256, 86);
   ctx.font = '600 16px Inter, system-ui, sans-serif';
   ctx.fillStyle = '#9da1ab';
-  ctx.fillText(String(Math.round(Math.abs(car.speed) * 3.6)), 256, 126);
+  ctx.fillText(String(Math.round(Math.abs(car.speed) * speedFactor)), 256, 126);
 
   // Warning lights: battery + oil light up with the ignition on and the engine off.
   if (!car.running) {
@@ -85,7 +88,7 @@ export function drawCluster(canvas: HTMLCanvasElement, car: Car, time: number) {
     ctx.fill();
   }
   // Shift light near the limiter.
-  if (car.rpm > 6300 && Math.floor(time * 12) % 2 === 0) {
+  if (car.rpm > redline - 200 && Math.floor(time * 12) % 2 === 0) {
     ctx.fillStyle = '#ff3d3d';
     ctx.beginPath();
     ctx.arc(256, 30, 9, 0, Math.PI * 2);

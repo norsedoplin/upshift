@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CARS, forwardGears } from '../cars';
 import { Car } from '../sim/car';
 import { Chassis } from '../sim/chassis';
 import { collideWithEdges } from './collide';
@@ -7,10 +8,11 @@ import { generateTouge, SAMPLE_STEP } from './touge';
 // A simple robot driver: pure-pursuit steering, speed picked from the curvature ahead,
 // gear chosen by rpm with proper clutch use. If it can finish, a person can.
 describe('touge is drivable', () => {
-  it('a robot driver gets from start to finish', () => {
-    const road = generateTouge();
-    const car = new Car();
-    const ch = new Chassis();
+  const road = generateTouge();
+  it.each(CARS.map((m) => [m.name, m] as const))('a robot driver gets the %s from start to finish', (_name, model) => {
+    const car = new Car(model.spec);
+    const ch = new Chassis(model.chassis);
+    const topGear = forwardGears(model.spec).length;
     const start = road.sampleAt(road.startS - 18);
     ch.place(start.x, start.z, start.yaw);
     let idx = Math.round(start.s / SAMPLE_STEP);
@@ -55,7 +57,7 @@ describe('touge is drivable', () => {
         clutch = shiftTimer > 0.25 ? 1 : Math.max(0, shiftTimer / 0.25);
         throttle = shiftTimer > 0.25 ? 0 : 0.2;
       } else if (car.gear >= 1 && v > 1) {
-        const up = car.rpm > 4500 && car.gear < 5;
+        const up = car.rpm > car.spec.revLimit - 2300 && car.gear < topGear;
         const down = car.rpm < 1600 && car.gear > 1;
         if (up || down) {
           clutch = 1;

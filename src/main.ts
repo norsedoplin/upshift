@@ -12,6 +12,10 @@ import { buildScenery } from './track/scenery';
 import { collideWithEdges } from './track/collide';
 import { Scorer, credsForRun, ScoreEvent } from './game/scoring';
 import { loadProgress, saveProgress } from './game/progress';
+import { paintFor } from './game/shop';
+import { carById, forwardGears } from './cars';
+import { Menus } from './ui/menus';
+import { Showroom } from './ui/showroom';
 
 const SIM_DT = 0.001;
 
@@ -25,17 +29,19 @@ const road = generateTouge();
 buildScenery(scene, road);
 const cockpit = buildCockpit();
 scene.add(cockpit.root);
+const showroom = new Showroom();
 
-const car = new Car();
-const chassis = new Chassis();
+const progress = loadProgress();
+let model = carById(progress.car);
+let car = new Car(model.spec);
+let chassis = new Chassis(model.chassis);
+let gearSequence = [-1, 0, ...forwardGears(model.spec)];
 const input = new Input();
 const haptics = new Haptics();
 const audio = new EngineAudio();
 const scorer = new Scorer();
-const progress = loadProgress();
 
 const $ = (id: string) => document.getElementById(id)!;
-const overlay = $('overlay');
 const message = $('message');
 const debug = $('debug');
 const debugText = $('debug-text');
@@ -45,25 +51,62 @@ const pedals = { clutch: $('bar-clutch'), brake: $('bar-brake'), throttle: $('ba
 const hint = $('hint');
 const hud = { score: $('score'), combo: $('combo'), creds: $('creds'), timer: $('timer'), progress: $('progress-fill') };
 const toasts = $('toasts');
-const summary = $('summary');
 
 type RunState = 'idle' | 'running' | 'finished';
 let run: RunState = 'idle';
 let runTime = 0;
 let roadIndex = 0;
-let started = false;
 let debugOn = false;
 let flash = { text: '', until: 0 };
 
-const startBtn = $('start-btn') as HTMLButtonElement;
-startBtn.textContent = 'Click to start';
-startBtn.disabled = false;
-overlay.addEventListener('click', () => {
-  audio.start();
-  overlay.classList.add('hidden');
-  started = true;
+const menus = new Menus(progress, {
+  start: () => audio.start(),
+  drive: () => {
+    resetRun();
+    menus.open(null);
+  },
+  resume: () => menus.open(null),
+  restart: () => {
+    resetRun();
+    menus.open(null);
+  },
+  toMenu: () => {
+    resetRun();
+    menus.open('main');
+  },
+  carChanged: () => applyCar(),
+  settingsChanged: () => applySettings(),
+  preview: (m, paint) => {
+    if (m && paint) {
+      if (previewKey !== m.id) showroom.show(m.body, paint);
+      else showroom.setPaint(paint);
+      previewKey = m.id;
+    } else previewKey = '';
+  },
 });
-summary.addEventListener('click', () => resetRun());
+let previewKey = '';
+$('loading').remove();
+
+/** Swap in the selected car (physics, sound, paint) and put it on the start line. */
+function applyCar() {
+  const next = carById(progress.car);
+  const paint = paintFor(progress, next.id).color;
+  cockpit.paint.color.set(paint);
+  if (next.id !== model.id) {
+    model = next;
+    car = new Car(model.spec);
+    chassis = new Chassis(model.chassis);
+    gearSequence = [-1, 0, ...forwardGears(model.spec)];
+    audio.setEngine(model.cylinders);
+    resetRun();
+  }
+}
+
+function applySettings() {
+  const st = progress.settings;
+  haptics.strength = st.rumble;
+  audio.setVolume(st.volume);
+}
 
 function resetRun() {
   car.reset();
@@ -73,8 +116,12 @@ function resetRun() {
   scorer.reset();
   run = 'idle';
   runTime = 0;
-  summary.classList.add('hidden');
+  toasts.innerHTML = '';
 }
+
+cockpit.paint.color.set(paintFor(progress, model.id).color);
+audio.setEngine(model.cylinders);
+applySettings();
 resetRun();
 
 function resize() {
@@ -103,6 +150,7 @@ let simAccumulator = 0;
 let time = 0;
 let pitch = 0;
 let grade = 0;
+let driveTime = 0;
 
 function frame(now: number) {
   requestAnimationFrame(frame);
@@ -112,8 +160,30 @@ function frame(now: number) {
   time += dt;
 
   const c = input.read(dt);
+  const nav = input.nav(dt);
   const pad = input.gamepad();
 
+  // Menus pause the world: no physics, no engine sound, no rumble.
+  audio.setMuted(menus.isOpen);
+  document.body.classList.toggle('in-menu', menus.isOpen);
+  if (menus.isOpen) {
+    menus.update(nav);
+    simAccumulator = 0;
+    haptics.update(dt, car, null);
+    if (menus.screen === 'garage') {
+      showroom.render(renderer, dt, window.innerWidth / window.innerHeight);
+    } else {
+      renderer.render(scene, cockpit.camera);
+    }
+    return;
+  }
+  driveTime += dt;
+
+  if (c.pause) {
+    menus.open('pause');
+    haptics.stop(pad);
+    return;
+  }
   if (c.toggleDebug) {
     debugOn = !debugOn;
     debug.classList.toggle('hidden', !debugOn);
@@ -123,10 +193,9 @@ function frame(now: number) {
     if (car.running) car.stopEngine();
     else car.crank();
   }
-  const sequence = [-1, 0, 1, 2, 3, 4, 5];
   if (c.shiftUp || c.shiftDown) {
-    const idx = sequence.indexOf(car.gear) + (c.shiftUp ? 1 : -1);
-    if (idx >= 0 && idx < sequence.length) car.shiftTo(sequence[idx], c.clutch);
+    const idx = gearSequence.indexOf(car.gear) + (c.shiftUp ? 1 : -1);
+    if (idx >= 0 && idx < gearSequence.length) car.shiftTo(gearSequence[idx], c.clutch);
   }
 
   // Road grade along the car's heading.
@@ -216,7 +285,7 @@ function frame(now: number) {
   );
   cockpit.head.rotation.x = Math.max(-0.04, Math.min(0.04, car.accel * 0.004));
 
-  drawCluster(cockpit.clusterCanvas, car, time);
+  drawCluster(cockpit.clusterCanvas, car, time, progress.settings.units);
   cockpit.cluster.needsUpdate = true;
 
   updateHud(c.clutch, c.brake, c.throttle, pad, s);
@@ -225,23 +294,15 @@ function frame(now: number) {
 
 function finishRun() {
   run = 'finished';
-  const stats = scorer.stats;
+  const stats = { ...scorer.stats };
   const earned = credsForRun(stats);
   const best = stats.score > progress.bestScore;
   progress.creds += earned;
   progress.runs += 1;
   progress.bestScore = Math.max(progress.bestScore, stats.score);
   saveProgress(progress);
-  $('sum-score').textContent = stats.score.toLocaleString();
-  $('sum-best').textContent = best ? 'New personal best' : `Best ${progress.bestScore.toLocaleString()}`;
-  $('sum-creds').textContent = `+${earned}`;
-  $('sum-time').textContent = formatTime(runTime);
-  $('sum-shifts').textContent = String(stats.shifts);
-  $('sum-clean').textContent = String(stats.perfect + stats.clean);
-  $('sum-heeltoe').textContent = String(stats.heelToe);
-  $('sum-combo').textContent = `×${(1 + Math.min(stats.bestCombo, 8) * 0.25).toFixed(2)}`;
-  $('sum-stalls').textContent = String(stats.stalls);
-  summary.classList.remove('hidden');
+  haptics.stop(input.gamepad());
+  menus.showSummary(stats, earned, best, formatTime(runTime));
 }
 
 function formatTime(t: number) {
@@ -261,9 +322,9 @@ function showToast(e: ScoreEvent) {
 }
 
 function updateHud(clutch: number, brake: number, throttle: number, pad: Gamepad | null, s: number) {
+  pedals.clutch.style.height = `${clutch * 100}%`;
   pedals.brake.style.height = `${brake * 100}%`;
   pedals.throttle.style.height = `${throttle * 100}%`;
-  pedals.clutch.style.height = `${clutch * 100}%`;
   const inBite = car.clutchCapacity > 0 && car.clutchCapacity < car.spec.clutchMaxTorque * 0.95;
   pedals.clutch.classList.toggle('bite', inBite);
 
@@ -286,12 +347,13 @@ function updateHud(clutch: number, brake: number, throttle: number, pad: Gamepad
   padStatus.textContent = pad
     ? `${shortPadName(pad.id)}${hasRumble ? '' : ' · no rumble in this browser'}`
     : 'No controller: press any button on it';
-  hint.classList.toggle('hidden', started && time > 25);
+  hint.classList.toggle('hidden', !progress.settings.hints || driveTime > 25);
 
   if (debugOn) {
+    const speedFactor = progress.settings.units === 'mph' ? 2.23694 : 3.6;
     debugText.textContent = [
       `rpm        ${car.rpm.toFixed(0)}`,
-      `speed      ${(car.speed * 3.6).toFixed(1)} km/h`,
+      `speed      ${(car.speed * speedFactor).toFixed(1)} ${progress.settings.units === 'mph' ? 'mph' : 'km/h'}`,
       `gear       ${gearLabel(car.gear)}`,
       `clutch     ${(clutch * 100).toFixed(0)}%  cap ${car.clutchCapacity.toFixed(0)} Nm`,
       `clutch Tq  ${car.clutchTorque.toFixed(0)} Nm  ${car.locked ? 'LOCKED' : 'slipping'}`,
@@ -339,4 +401,18 @@ function drawBite(pedal: number) {
 requestAnimationFrame(frame);
 
 // Let automated tests and the console poke at the sim.
-(window as unknown as { upshift: unknown }).upshift = { car, chassis, road, scorer, haptics, resetRun };
+(window as unknown as { upshift: unknown }).upshift = {
+  get car() {
+    return car;
+  },
+  get chassis() {
+    return chassis;
+  },
+  road,
+  scorer,
+  haptics,
+  menus,
+  progress,
+  resetRun,
+  finishRun,
+};
