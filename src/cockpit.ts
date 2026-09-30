@@ -25,6 +25,7 @@ export interface Cockpit {
   clutchPedal: THREE.Mesh;
   brakePedal: THREE.Mesh;
   throttlePedal: THREE.Mesh;
+  paint: THREE.MeshLambertMaterial;
 }
 
 export function buildCockpit(): Cockpit {
@@ -109,12 +110,12 @@ export function buildCockpit(): Cockpit {
   head.add(camera);
   root.add(head);
 
-  return { root, camera, head, wheel, shifter, cluster, clusterCanvas, clutchPedal, brakePedal, throttlePedal };
+  return { root, camera, head, wheel, shifter, cluster, clusterCanvas, clutchPedal, brakePedal, throttlePedal, paint };
 }
 
 /** Position of the shift knob for each gear in a 5+R H-pattern (x = across, z = fore/aft). */
 export function shifterPose(gear: number): [number, number] {
   const col: Record<number, number> = { [-1]: 1.5, 0: 0, 1: -1, 2: -1, 3: 0, 4: 0, 5: 1, 6: 1 };
-  const row: Record<number, number> = { [-1]: 1, 0: 0, 1: -1, 2: 1, 3: -1, 4: 1, 5: -1 };
+  const row: Record<number, number> = { [-1]: 1, 0: 0, 1: -1, 2: 1, 3: -1, 4: 1, 5: -1, 6: 1 };
   return [col[gear] ?? 0, row[gear] ?? 0];
 }

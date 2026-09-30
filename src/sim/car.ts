@@ -96,9 +96,11 @@ export class Car {
   private fuelCut = false;
   private throttleLag = 0;
   private events: CarEvent[] = [];
+  private peakTorque: number;
 
   constructor(spec: CarSpec = HATCHBACK) {
     this.spec = spec;
+    this.peakTorque = Math.max(...spec.torqueCurve.map(([, t]) => t));
   }
 
   get rpm() {
@@ -246,7 +248,7 @@ export class Car {
 
     const friction = this.engineOmega > 0.01 ? this.frictionTorque(rpm) : 0;
     const engineTorque = this.combustionTorque + starter - friction;
-    this.load = this.running ? Math.min(1, this.combustionTorque / 146) : 0;
+    this.load = this.running ? Math.min(1, this.combustionTorque / this.peakTorque) : 0;
 
     // --- External forces on the car ------------------------------------
     const v = this.speed;

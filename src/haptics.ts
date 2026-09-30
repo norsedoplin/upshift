@@ -12,6 +12,7 @@ type Actuator = {
 
 export class Haptics {
   enabled = true;
+  strength = 1; // player setting, 0..1
   strong = 0;
   weak = 0;
   private impulse = 0; // decaying one-shot jolts
@@ -61,7 +62,7 @@ export class Haptics {
     const scrub = Math.max(0, Math.min(1, (tyreSlip - 0.08) / 0.2)) * (0.6 + 0.4 * Math.sin(this.t * 2 * Math.PI * 23));
     this.weak = clamp01(idle + bite * 0.3 + this.buzz * 0.9 + lug * 0.2 + scrub * 0.45);
 
-    if (!this.enabled || !pad) return;
+    if (!this.enabled || !pad || this.strength <= 0) return;
     const act = (pad as unknown as { vibrationActuator?: Actuator }).vibrationActuator;
     if (!act?.playEffect) return;
 
@@ -72,10 +73,11 @@ export class Haptics {
     this.lastSent = now;
     this.lastStrong = this.strong;
     this.lastWeak = this.weak;
-    const params = { startDelay: 0, duration: 120, strongMagnitude: this.strong, weakMagnitude: this.weak };
+    const k = this.strength;
+    const params = { startDelay: 0, duration: 120, strongMagnitude: this.strong * k, weakMagnitude: this.weak * k };
     if (act.effects?.includes('trigger-rumble')) {
       act
-        .playEffect('trigger-rumble', { ...params, leftTrigger: clamp01(bite * 0.9 + this.buzz * 0.5), rightTrigger: clamp01(lug * 0.4) })
+        .playEffect('trigger-rumble', { ...params, leftTrigger: clamp01(bite * 0.9 + this.buzz * 0.5) * k, rightTrigger: clamp01(lug * 0.4) * k })
         .catch(() => {});
     } else {
       act.playEffect('dual-rumble', params).catch(() => {});
