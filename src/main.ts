@@ -14,7 +14,8 @@ import { MAPS, roadFor } from './track/maps';
 import { buildScenery, SUN_DIR, updateTreeDetail } from './track/scenery';
 import { DayCycle } from './track/daylight';
 import { Graphics, bakeEnvironment } from './graphics';
-import { collideWithEdges } from './track/collide';
+import { CAR_HALF_WIDTH, collideWithEdges } from './track/collide';
+import { ComicFx } from './ui/comicFx';
 import { Scorer, cashoutFor, credsForRun, tierFor, ScoreEvent } from './game/scoring';
 import { CAMERA_VIEWS, loadProgress, saveProgress } from './game/progress';
 import { paintFor } from './game/shop';
@@ -102,6 +103,14 @@ const cashoutEl = $('cashout');
 let shownScore = 0;
 let lastTier = '';
 const toasts = $('toasts');
+const comic = new ComicFx($('fx-canvas') as HTMLCanvasElement);
+const tierBanner = $('tier-banner');
+const edgeFlash = $('edge-flash');
+/** 0..1 kick after a good shift or a new tier: widens the view and fires the speed lines. */
+let punch = 0;
+/** 0..1 how fast the car is going, for the speed effects. */
+let speed01 = 0;
+const carScreen = { x: 0, y: 0, scale: 1 };
 
 type RunState = 'idle' | 'running' | 'finished';
 let run: RunState = 'idle';
@@ -168,6 +177,13 @@ const menus = new Menus(progress, {
   },
 });
 let previewKey = '';
+// Mouse clutch: a click on the road grabs the pointer; letting it go (Esc) pauses.
+window.addEventListener('mousedown', (e) => {
+  if (!menus.isOpen && e.button === 0) input.grabMouse(document.body);
+});
+document.addEventListener('pointerlockchange', () => {
+  if (!document.pointerLockElement && input.mouseClutch && !menus.isOpen) menus.open('pause');
+});
 // Back from a map change: skip the title and land on the main menu.
 {
   let skip = false;
@@ -249,10 +265,15 @@ function applySettings() {
   const clutchPad = st.bindings.pad.clutch;
   haptics.clutchTrigger = clutchPad?.kind === 'button' ? (clutchPad.index === 6 ? 'left' : clutchPad.index === 7 ? 'right' : null) : null;
   haptics.clutchFeel = st.clutchFeel;
+  input.mouseClutch = st.mouseClutch > 0;
+  if (st.mouseClutch > 0) input.mouseTravel = st.mouseClutch;
+  else input.releaseMouse();
   updateHint();
   haptics.strength = st.rumble;
   audio.setVolume(st.volume);
   graphics.setRetro(st.retro);
+  graphics.setSpeedFx(st.speedFx);
+  document.body.classList.toggle('look-street', st.retro === 'street');
   document.body.classList.toggle('retro-vhs', st.retro === 'vhs');
   document.body.classList.toggle('retro-console', st.retro === 'console');
   if (st.graphics !== graphics.quality || !graphicsReady) {
@@ -365,6 +386,8 @@ function frame(now: number) {
   audio.setMuted(menus.isOpen);
   document.body.classList.toggle('in-menu', menus.isOpen);
   if (menus.isOpen) {
+    graphics.setMotion(0, 0);
+    if (document.pointerLockElement) input.releaseMouse();
     menus.update(nav);
     simAccumulator = 0;
     haptics.update(dt, car, null);
@@ -383,6 +406,7 @@ function frame(now: number) {
   driveTime += dt;
 
   if (c.pause) {
+    input.releaseMouse();
     menus.open('pause');
     haptics.stop(pad);
     return;
@@ -458,7 +482,18 @@ function frame(now: number) {
   if (run === 'running') {
     runTime += dt;
     scorer.update(dt, car, { throttle: c.throttle, brake: c.brake, clutch: c.clutch }, events);
-    for (const e of scorer.drain()) showToast(e);
+    const here = road.locate(chassis.x, chassis.z, roadIndex);
+    const side = Math.sign(here.offset) || 1;
+    scorer.track(dt, {
+      kappa: road.sampleAt(s).kappa,
+      edgeGap: road.wallOffset + road.lotDepth(here.s, side) - CAR_HALF_WIDTH - Math.abs(here.offset),
+      speed: Math.abs(car.speed),
+      latAccel: chassis.latAccel,
+    });
+    for (const e of scorer.drain()) {
+      showToast(e);
+      react(e);
+    }
     if (s >= road.finishS) finishRun();
   }
 
@@ -499,8 +534,10 @@ function frame(now: number) {
 
   // Speed effects: the view widens and shivers a touch as the speed builds.
   const fast = progress.settings.speedFx ? Math.max(0, Math.abs(car.speed) - 8) / 30 : 0;
-  const wantFov = Math.min(1, fast) * 9;
-  speedFov += (wantFov - speedFov) * Math.min(1, dt * 2.5);
+  speed01 += (Math.min(1, Math.max(0, (Math.abs(car.speed) - 12) / 30)) - speed01) * Math.min(1, dt * 3);
+  punch = Math.max(0, punch - dt * 1.8);
+  const wantFov = progress.settings.speedFx ? Math.min(1, fast) * 14 + punch * 7 : 0;
+  speedFov += (wantFov - speedFov) * Math.min(1, dt * (wantFov > speedFov ? 8 : 2.5));
   if (Math.abs(camera.fov - (baseFov + speedFov)) > 0.01) {
     camera.fov = baseFov + speedFov;
     camera.updateProjectionMatrix();
@@ -519,7 +556,76 @@ function frame(now: number) {
   shadowFocus.set(chassis.x - Math.sin(chassis.yaw) * 14, loc.h, chassis.z - Math.cos(chassis.yaw) * 14);
   graphics.follow(shadowFocus);
   updateTreeDetail(scenery.trees, shadowFocus);
+  graphics.setMotion(speed01, punch);
   graphics.render(camera);
+  placeCarOnScreen();
+  // The speed wings stream off the car body, so only from outside it.
+  comic.update(dt, carScreen, progress.settings.speedFx ? speed01 : 0, progress.settings.retro === 'street' && progress.settings.camera === 'chase');
+}
+
+const screenPos = new THREE.Vector3();
+/** Where the car's tail is on screen, for the comic effects (low in the middle from the cockpit). */
+function placeCarOnScreen() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  if (progress.settings.camera === 'chase') {
+    screenPos.set(chassis.x, exterior.group.position.y + 0.7, chassis.z);
+    const dist = screenPos.distanceTo(camera.position);
+    screenPos.project(camera);
+    carScreen.x = (screenPos.x * 0.5 + 0.5) * w;
+    carScreen.y = (-screenPos.y * 0.5 + 0.5) * h;
+    carScreen.scale = Math.min(1.6, (7 / Math.max(3, dist)) * (h / 720));
+  } else {
+    carScreen.x = w / 2;
+    carScreen.y = h * 0.86;
+    carScreen.scale = 1.6 * (h / 720);
+  }
+}
+
+/** Sound, sparks and screen kick for each score event. */
+function react(e: ScoreEvent) {
+  const big = e.label.startsWith('PERFECT') || e.label === 'HEEL-TOE' || e.label === 'FULL SEND';
+  const street = progress.settings.retro === 'street';
+  const x = carScreen.x;
+  const y = carScreen.y - 40 * carScreen.scale;
+  if (e.label === 'COMBO LOST' || !e.good) {
+    audio.sting('bad');
+    comic.puff(x, y, '#c9c4b8', e.label === 'COMBO LOST' ? 7 : 4);
+    flashEdges('#ff3d5a');
+    return;
+  }
+  if (big) {
+    audio.sting('great', e.combo);
+    comic.burst(x, y, street ? '#ffe14d' : '#c8f04a', 1.2);
+    punch = 1;
+    flashEdges('#ffe14d');
+  } else {
+    audio.sting('good', e.combo);
+    if (e.label === 'CLOSE CALL') comic.puff(x, y, '#ffffff', 5);
+    else if (e.label === 'HAIRPIN') comic.burst(x, y, '#4de1ff', 0.8);
+    else if (e.label.endsWith('SHIFT')) punch = Math.max(punch, 0.45);
+  }
+}
+
+function flashEdges(color: string) {
+  edgeFlash.style.setProperty('--flash', color);
+  edgeFlash.classList.remove('go');
+  void edgeFlash.offsetWidth;
+  edgeFlash.classList.add('go');
+}
+
+/** New combo tier: the banner slams across and everything kicks. */
+function showTier(tier: string) {
+  tierBanner.dataset.tier = tier.toLowerCase().replace(/ /g, '-');
+  tierBanner.querySelector('b')!.textContent = tier;
+  tierBanner.querySelector('span')!.textContent = `×${scorer.multiplier.toFixed(2)}`;
+  tierBanner.classList.remove('show');
+  void tierBanner.offsetWidth;
+  tierBanner.classList.add('show');
+  audio.sting('tier', scorer.combo);
+  punch = 1;
+  comic.burst(window.innerWidth / 2, window.innerHeight * 0.46, '#ffe14d', 1.6);
+  flashEdges('#ff8a3d');
 }
 
 function drawRide(tile: HTMLCanvasElement, dt: number) {
@@ -564,8 +670,9 @@ function updateChaseCamera(dt: number, groundY: number) {
   chaseCam.yaw += dy * k;
   const back = new THREE.Vector3(Math.sin(chaseCam.yaw), 0, Math.cos(chaseCam.yaw)); // -forward
   const target = new THREE.Vector3(chassis.x, groundY, chassis.z);
-  const want = target.clone().addScaledVector(back, 6.2);
-  want.y = Math.max(groundY + 2.1, road.sampleAt(Math.max(0, roadS - 6)).h + 1.6);
+  // At speed the camera drops back and down a little, so the road rushes by.
+  const want = target.clone().addScaledVector(back, 6.2 + speed01 * 1.4);
+  want.y = Math.max(groundY + 2.1 - speed01 * 0.35, road.sampleAt(Math.max(0, roadS - 6)).h + 1.6);
   if (chaseCam.ready) chaseCam.pos.lerp(want, Math.min(1, dt * 8));
   else chaseCam.pos.copy(want);
   chaseCam.ready = true;
@@ -655,9 +762,14 @@ function formatTime(t: number) {
   return `${m}:${s.toFixed(1).padStart(4, '0')}`;
 }
 
+function tierRank(name: string) {
+  return ['', 'WARM', 'HOT', 'ON FIRE', 'TOUGE KING'].indexOf(name);
+}
+
 function showToast(e: ScoreEvent, extra = '') {
   const el = document.createElement('div');
-  const big = e.label.startsWith('PERFECT') || e.label === 'HEEL-TOE';
+  const big = e.label.startsWith('PERFECT') || e.label === 'HEEL-TOE' || e.label === 'FULL SEND';
+  el.style.setProperty('--rot', `${(Math.random() - 0.5) * 7}deg`);
   el.className = `toast ${e.good ? 'good' : 'bad'}${big ? ' big' : ''}`;
   const pts = e.points === 0 ? '' : `${e.points > 0 ? '+' : ''}${e.points}`;
   el.innerHTML = `<span>${e.label}</span>${pts ? `<b>${pts}</b>` : ''}`;
@@ -669,7 +781,7 @@ function showToast(e: ScoreEvent, extra = '') {
   }
   if (extra) el.classList.add(extra);
   toasts.prepend(el);
-  while (toasts.children.length > 4) toasts.lastChild!.remove();
+  while (toasts.children.length > 3) toasts.lastChild!.remove();
   setTimeout(() => el.classList.add('fade'), 1800);
   setTimeout(() => el.remove(), 2400);
 }
@@ -691,7 +803,7 @@ function updateHud(clutch: number, brake: number, throttle: number, pad: Gamepad
   hud.combo.dataset.tier = tier.toLowerCase().replace(/ /g, '-');
   hud.comboFill.style.width = `${(Math.min(scorer.combo, 8) / 8) * 100}%`;
   hud.flowFill.style.width = `${scorer.flowLevel * 100}%`;
-  if (tier && tier !== lastTier && run === 'running') showToast({ label: `${tier} ×${scorer.multiplier.toFixed(2)}`, points: 0, combo: scorer.combo, good: true }, 'tier');
+  if (tier && tier !== lastTier && run === 'running' && tierRank(tier) > tierRank(lastTier)) showTier(tier);
   lastTier = tier;
   hud.creds.textContent = `◆ ${progress.creds.toLocaleString()}`;
   hud.timer.textContent = run === 'idle' ? 'Drive to the start line' : formatTime(runTime);
@@ -703,6 +815,7 @@ function updateHud(clutch: number, brake: number, throttle: number, pad: Gamepad
   if (performance.now() < flash.until) msg = flash.text;
   else if (!car.running && !car.cranking)
     msg = car.gear !== 0 ? `Clutch in (or neutral), then ${gp} to start` : `Press ${gp} to start the engine`;
+  else if (input.mouseClutch && !input.mouseGrabbed) msg = 'Click to use the mouse as your clutch';
   message.textContent = msg;
   message.classList.toggle('visible', msg !== '');
 
@@ -797,4 +910,10 @@ requestAnimationFrame(frame);
   graphics,
   showroom,
   day,
+  // For testing the score effects by hand from the console.
+  pop: (e: ScoreEvent) => {
+    showToast(e);
+    react(e);
+  },
+  showTier,
 };

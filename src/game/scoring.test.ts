@@ -116,7 +116,39 @@ describe('combo tiers and cashout', () => {
     expect(tierFor(12).name).toBe('TOUGE KING');
   });
   it('pays a tenth of the score when you leave early, without the finish bonus', () => {
-    const stats = { score: 1840, shifts: 0, perfect: 0, clean: 0, heelToe: 0, stalls: 0, bestCombo: 0, flow: 0 };
+    const stats = { score: 1840, shifts: 0, perfect: 0, clean: 0, heelToe: 0, stalls: 0, bestCombo: 0, flow: 0, corners: 0 };
     expect(cashoutFor(stats)).toBe(184);
+  });
+});
+
+describe('line scoring', () => {
+  const drive = (sc: Scorer, seconds: number, l: { kappa: number; edgeGap?: number; speed?: number; latAccel?: number }) => {
+    for (let t = 0; t < seconds; t += FRAME) sc.track(FRAME, { edgeGap: 1.5, speed: 15, latAccel: 3, ...l });
+    return sc.drain();
+  };
+  it('pays for a hairpin taken cleanly, once you are out of it', () => {
+    const sc = new Scorer();
+    expect(drive(sc, 3, { kappa: 1 / 16 })).toEqual([]);
+    const ev = drive(sc, 1, { kappa: 0 });
+    expect(ev.map((e) => e.label)).toEqual(['HAIRPIN']);
+    expect(sc.stats.corners).toBe(1);
+  });
+  it('calls it a full send when you carry real speed through', () => {
+    const sc = new Scorer();
+    drive(sc, 2, { kappa: 1 / 60, latAccel: 7.5 });
+    expect(drive(sc, 1, { kappa: 0 }).map((e) => e.label)).toEqual(['FULL SEND']);
+  });
+  it('gives nothing for a corner that touched the rail', () => {
+    const sc = new Scorer();
+    const car = new Car();
+    drive(sc, 1, { kappa: 1 / 40 });
+    sc.update(FRAME, car, { throttle: 0, brake: 0, clutch: 0 }, [{ type: 'wall', impact: 2 }]);
+    drive(sc, 1, { kappa: 1 / 40 });
+    expect(drive(sc, 1, { kappa: 0 }).map((e) => e.label)).not.toContain('CLEAN CORNER');
+  });
+  it('rewards skimming the rail at speed, but not every frame', () => {
+    const sc = new Scorer();
+    const ev = drive(sc, 1, { kappa: 0, edgeGap: 0.2, speed: 20 });
+    expect(ev.filter((e) => e.label === 'CLOSE CALL')).toHaveLength(1);
   });
 });

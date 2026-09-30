@@ -14,6 +14,14 @@ export interface ScoreEvent {
   good: boolean;
 }
 
+/** Where the car is on the road, for corner and close-call scoring. */
+export interface LineInfo {
+  kappa: number; // road curvature here, 1/m
+  edgeGap: number; // metres of room left before the rail on the nearer side
+  speed: number; // m/s
+  latAccel: number; // m/s^2
+}
+
 export interface ScoreInputs {
   throttle: number;
   brake: number;
@@ -44,6 +52,7 @@ export interface RunStats {
   stalls: number;
   bestCombo: number;
   flow: number; // points from keeping the car in its powerband
+  corners: number; // corners taken cleanly
 }
 
 /** Combo tiers: names for the multiplier as it climbs. */
@@ -65,7 +74,7 @@ export class Scorer {
   time = 0;
   score = 0;
   combo = 0;
-  stats: RunStats = { score: 0, shifts: 0, perfect: 0, clean: 0, heelToe: 0, stalls: 0, bestCombo: 0, flow: 0 };
+  stats: RunStats = { score: 0, shifts: 0, perfect: 0, clean: 0, heelToe: 0, stalls: 0, bestCombo: 0, flow: 0, corners: 0 };
   /** 0..1: how much of the current flow streak has built up (for the HUD). */
   flowLevel = 0;
   private flowAcc = 0;
@@ -81,6 +90,8 @@ export class Scorer {
   private limiterFlagged = false;
   private launch: { energy: number } | null = null;
   private wallCooldown = 0;
+  private corner: { time: number; peakK: number; peakLat: number; clean: boolean; out: number } | null = null;
+  private closeCooldown = 0;
 
   get multiplier() {
     return 1 + Math.min(this.combo, 8) * 0.25;
@@ -129,6 +140,44 @@ export class Scorer {
     }
   }
 
+  /**
+   * Line scoring, called every frame with where the car is: a bonus for each corner taken
+   * without touching the rail (more for hairpins and for carrying speed through), and a
+   * close call for skimming the rail at speed without hitting it.
+   */
+  track(dt: number, l: LineInfo) {
+    this.closeCooldown = Math.max(0, this.closeCooldown - dt);
+    const k = Math.abs(l.kappa);
+    const lat = Math.abs(l.latAccel);
+    if (k > 1 / 90) {
+      if (!this.corner) this.corner = { time: 0, peakK: 0, peakLat: 0, clean: true, out: 0 };
+      const c = this.corner;
+      c.time += dt;
+      c.out = 0;
+      c.peakK = Math.max(c.peakK, k);
+      c.peakLat = Math.max(c.peakLat, lat);
+      if (l.speed < 3) c.clean = false; // stopped in the corner: no credit
+    } else if (this.corner) {
+      // A short straight bit inside a long corner doesn't end it.
+      this.corner.out += dt;
+      if (this.corner.out > 0.35) {
+        const c = this.corner;
+        this.corner = null;
+        if (c.clean && c.time > 0.8 && l.speed > 6) {
+          const hairpin = c.peakK > 1 / 24;
+          const commit = Math.min(1, c.peakLat / 7);
+          const label = c.peakLat > 6.5 ? 'FULL SEND' : hairpin ? 'HAIRPIN' : 'CLEAN CORNER';
+          this.stats.corners++;
+          this.award(label, Math.round((hairpin ? 45 : 22) * (0.6 + 0.9 * commit)), true);
+        }
+      }
+    }
+    if (this.closeCooldown === 0 && l.speed > 14 && l.edgeGap < 0.3) {
+      this.closeCooldown = 3;
+      this.award('CLOSE CALL', 30, true);
+    }
+  }
+
   update(dt: number, car: Car, inp: ScoreInputs, carEvents: CarEvent[]) {
     this.time += dt;
     this.wallCooldown = Math.max(0, this.wallCooldown - dt);
@@ -151,7 +200,11 @@ export class Scorer {
         this.breakCombo();
         this.stats.stalls++;
         this.award('STALLED', -100, false);
-      } else if (e.type === 'wall' && this.wallCooldown === 0 && e.impact > 1.5) {
+      } else if (e.type === 'wall' && e.impact > 0.3 && this.corner) {
+        this.corner.clean = false;
+      }
+      if (e.type === 'wall' && e.impact > 0.3) this.closeCooldown = 2;
+      if (e.type === 'wall' && this.wallCooldown === 0 && e.impact > 1.5) {
         this.wallCooldown = 1;
         this.breakCombo();
         this.award('HIT THE RAIL', -Math.round(Math.min(150, 20 + e.impact * 12)), false);

@@ -65,6 +65,16 @@ export class Input {
   private capture: { kind: 'pad' | 'key'; armed: boolean; baseline: number[]; until: number } | null = null;
   private capturedKey: string | null = null;
   lastSource: 'gamepad' | 'keyboard' = 'keyboard';
+  /**
+   * Mouse clutch: with the pointer grabbed, the mouse is the pedal. Pull it towards you to
+   * push the clutch in, push it away to let it out; a click stamps it straight to the floor
+   * and the wheel nudges it.
+   */
+  mouseClutch = false;
+  /** Pixels of mouse travel for the full pedal. */
+  mouseTravel = 260;
+  private mousePedal = 0;
+  private mouseHeld = false;
 
   constructor() {
     window.addEventListener('keydown', (e) => {
@@ -79,11 +89,52 @@ export class Input {
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('mousemove', (e) => {
+      if (!this.mouseGrabbed) return;
+      this.mousePedal = Math.min(1, Math.max(0, this.mousePedal + e.movementY / this.mouseTravel));
+      if (e.movementY !== 0) this.lastSource = 'keyboard';
+    });
+    window.addEventListener('mousedown', (e) => {
+      if (!this.mouseGrabbed || e.button !== 0) return;
+      this.mouseHeld = true;
+      this.mousePedal = 1;
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.mouseHeld = false;
+    });
+    window.addEventListener(
+      'wheel',
+      (e) => {
+        if (!this.mouseGrabbed) return;
+        this.mousePedal = Math.min(1, Math.max(0, this.mousePedal + Math.sign(e.deltaY) * 0.08));
+      },
+      { passive: true },
+    );
     window.addEventListener('blur', () => this.keys.clear());
     window.addEventListener('gamepadconnected', (e) => (this.gamepadIndex = e.gamepad.index));
     window.addEventListener('gamepaddisconnected', (e) => {
       if (this.gamepadIndex === e.gamepad.index) this.gamepadIndex = null;
     });
+  }
+
+  /** True while the pointer is locked to the game for the mouse clutch. */
+  get mouseGrabbed() {
+    return this.mouseClutch && document.pointerLockElement !== null;
+  }
+
+  /** Lock the pointer so the mouse drives the clutch. Must run from a click. */
+  grabMouse(el: HTMLElement) {
+    if (!this.mouseClutch || document.pointerLockElement) return;
+    try {
+      const r = el.requestPointerLock() as unknown as Promise<void> | undefined;
+      r?.catch?.(() => {});
+    } catch {
+      // Not allowed right now (no click, or the browser said no).
+    }
+  }
+
+  releaseMouse() {
+    if (document.pointerLockElement) document.exitPointerLock();
   }
 
   gamepad(): Gamepad | null {
@@ -119,7 +170,7 @@ export class Input {
     const c: Controls = {
       throttle: this.kbThrottle,
       brake: this.kbBrake,
-      clutch: this.kbClutch,
+      clutch: Math.max(this.kbClutch, this.mouseGrabbed ? (this.mouseHeld ? 1 : this.mousePedal) : 0),
       steer: this.kbSteer,
       handbrake: any(kb.handbrake),
       shiftUp: edge(kb.shiftUp),

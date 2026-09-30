@@ -162,6 +162,73 @@ export class EngineAudio {
     this.clutchGain.gain.setTargetAtTime(Math.min(0.05, slipPower / 400000), t, tc);
   }
 
+  /**
+   * Little musical stings for score events: a chime that climbs in pitch as the combo grows,
+   * a brighter arpeggio for the big ones, a dull thud for mistakes and a riser on a new tier.
+   */
+  sting(kind: 'good' | 'great' | 'bad' | 'tier', combo = 0) {
+    const ctx = this.ctx;
+    if (!ctx || this.muted) return;
+    const t0 = ctx.currentTime + 0.005;
+    const out = ctx.createGain();
+    out.gain.value = 0.5;
+    out.connect(this.master);
+    const note = (freq: number, at: number, len: number, type: OscillatorType, vol: number) => {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t0 + at);
+      g.gain.linearRampToValueAtTime(vol, t0 + at + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0008, t0 + at + len);
+      o.connect(g).connect(out);
+      o.start(t0 + at);
+      o.stop(t0 + at + len + 0.05);
+    };
+    // A major scale step per combo level, so a streak sounds like it's going somewhere.
+    const steps = [0, 2, 4, 5, 7, 9, 11, 12, 14];
+    const root = 523.25 * 2 ** (steps[Math.min(8, combo)] / 12);
+    if (kind === 'good') {
+      note(root, 0, 0.16, 'triangle', 0.22);
+      note(root * 1.5, 0.06, 0.2, 'triangle', 0.16);
+    } else if (kind === 'great') {
+      [1, 1.25, 1.5, 2].forEach((m, i) => note(root * m, i * 0.05, 0.28, 'triangle', 0.2));
+      note(root * 4, 0.15, 0.4, 'sine', 0.06);
+    } else if (kind === 'bad') {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(190, t0);
+      o.frequency.exponentialRampToValueAtTime(70, t0 + 0.28);
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 600;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.25, t0);
+      g.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.3);
+      o.connect(f).connect(g).connect(out);
+      o.start(t0);
+      o.stop(t0 + 0.35);
+    } else {
+      [1, 1.25, 1.5, 2, 2.5].forEach((m, i) => note(root * m * 0.5, i * 0.07, 0.35, 'sawtooth', 0.07));
+      [1, 1.5, 2].forEach((m) => note(root * m, 0.35, 0.6, 'triangle', 0.12));
+      // A whoosh under it.
+      const n = makeNoise(ctx);
+      const f = ctx.createBiquadFilter();
+      f.type = 'bandpass';
+      f.Q.value = 2;
+      f.frequency.setValueAtTime(400, t0);
+      f.frequency.exponentialRampToValueAtTime(5000, t0 + 0.45);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.18, t0 + 0.35);
+      g.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.7);
+      n.connect(f).connect(g).connect(out);
+      n.start(t0);
+      n.stop(t0 + 0.75);
+    }
+    setTimeout(() => out.disconnect(), 1500);
+  }
+
   setMuted(m: boolean) {
     this.muted = m;
     if (this.ctx) this.master.gain.setTargetAtTime(m ? 0 : this.volume, this.ctx.currentTime, 0.05);
