@@ -496,6 +496,7 @@ function frame(now: number) {
     } else if (e.type === 'blowoff') {
       audio.blowoff(e.boost);
       haptics.jolt(0.12 * e.boost);
+      haptics.flutter(e.boost);
     }
   }
 
@@ -938,6 +939,9 @@ requestAnimationFrame(frame);
   },
   get chassis() {
     return chassis;
+  },
+  get cockpit() {
+    return cockpit;
   },
   road,
   scorer,

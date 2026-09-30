@@ -18,6 +18,8 @@ export class Haptics {
   weak = 0;
   private impulse = 0; // decaying one-shot jolts
   private buzz = 0;
+  private flutterAmp = 0; // turbo flutter on lift-off: a quick decaying pulse train
+  private flutterT = 0;
   private lastSent = 0;
   private lastStrong = -1;
   private lastWeak = -1;
@@ -41,6 +43,10 @@ export class Haptics {
   jolt(strength: number) {
     this.impulse = Math.max(this.impulse, strength);
   }
+  flutter(strength: number) {
+    this.flutterAmp = Math.max(this.flutterAmp, Math.min(0.35, strength * 0.3));
+    this.flutterT = 0;
+  }
   thud(strength: number) {
     this.impulse = Math.max(this.impulse, Math.min(0.6, strength));
   }
@@ -53,6 +59,9 @@ export class Haptics {
     this.t += dt;
     this.impulse *= Math.exp(-dt / 0.12);
     this.buzz *= Math.exp(-dt / 0.08);
+    this.flutterAmp *= Math.exp(-dt / 0.18);
+    this.flutterT += dt;
+    const flutter = this.flutterAmp > 0.02 && Math.sin(this.flutterT * 2 * Math.PI * 13) > 0 ? this.flutterAmp : 0;
 
     // A soft thud as the clutch comes fully home, bigger for a quick release in gear.
     const engage = car.spec.clutchMaxTorque > 0 ? car.clutchCapacity / car.spec.clutchMaxTorque : 1;
@@ -91,7 +100,7 @@ export class Haptics {
     this.strong = clamp01(bite + lug * 0.4 + this.impulse + boost * 0.12);
     // Tyres near and past their grip limit: a fine buzz you can drive by.
     const scrub = Math.max(0, Math.min(1, (tyreSlip - 0.08) / 0.2)) * (0.6 + 0.4 * Math.sin(this.t * 2 * Math.PI * 23));
-    this.weak = clamp01(idle + boost * 0.1 + bite * 0.35 + this.buzz * 0.9 + lug * 0.12 + scrub * 0.22);
+    this.weak = clamp01(idle + boost * 0.1 + bite * 0.35 + this.buzz * 0.9 + flutter + lug * 0.12 + scrub * 0.22);
 
     if (this.dualsense.connected) {
       if (performance.now() < this.testUntil) return;

@@ -217,7 +217,7 @@ export class Scorer {
       if (inp.throttle > 0.3) p.blipped = true;
       if (inp.brake > 0.25) p.braking = true;
       const slip = (car.engineOmega - car.outputOmega) * RPM;
-      if (p.slipAtBite === null && car.clutchCapacity > 30) {
+      if (p.slipAtBite === null && car.clutchCapacity > car.spec.clutchMaxTorque * 0.05) {
         p.slipAtBite = slip;
         // Dropping the clutch into a gear that would spin the engine far past the limiter.
         if (car.outputOmega * RPM > car.spec.revLimit + 700) p.moneyShift = true;

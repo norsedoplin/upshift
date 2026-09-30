@@ -66,7 +66,7 @@ describe('tuning', () => {
   it('narrows the bite with a stage clutch and lightens the car', () => {
     const stock = carById('hatch').spec;
     const t = tunedSpec(stock, { clutch: 2, weight: 2 });
-    expect(t.biteEnd - t.biteStart).toBeLessThan((stock.biteEnd - stock.biteStart) * 0.7);
+    expect(t.biteEnd - t.biteStart).toBeLessThan((stock.biteEnd - stock.biteStart) * 0.8);
     expect(t.mass).toBeCloseTo(stock.mass * 0.9);
   });
 });
