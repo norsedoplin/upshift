@@ -14,6 +14,32 @@
 
     <div id="message"></div>
 
+    <div id="topbar">
+      <div id="creds"></div>
+      <div id="scorebox"><div id="score">0</div><div id="combo"></div></div>
+      <div id="timer"></div>
+    </div>
+    <div id="progress"><div id="progress-fill"></div></div>
+    <div id="toasts"></div>
+
+    <div id="summary" class="hidden">
+      <div class="card">
+        <p class="tag">Run complete</p>
+        <h1 id="sum-score">0</h1>
+        <p id="sum-best" class="muted"></p>
+        <div class="earned"><span>Creds earned</span><b id="sum-creds"></b></div>
+        <dl>
+          <dt>Time</dt><dd id="sum-time"></dd>
+          <dt>Gear changes</dt><dd id="sum-shifts"></dd>
+          <dt>Clean or perfect</dt><dd id="sum-clean"></dd>
+          <dt>Heel-toe</dt><dd id="sum-heeltoe"></dd>
+          <dt>Best combo</dt><dd id="sum-combo"></dd>
+          <dt>Stalls</dt><dd id="sum-stalls"></dd>
+        </dl>
+        <button>Run it again (Options / R)</button>
+      </div>
+    </div>
+
     <div id="pedals" title="Clutch · Brake · Gas">
       <div class="pedal"><div id="bar-clutch" class="bar"></div><span>C</span></div>
       <div class="pedal"><div id="bar-brake" class="bar"></div><span>B</span></div>
@@ -23,9 +49,9 @@
     <div id="pad-status"></div>
 
     <div id="hint">
-      <b>DualSense</b> L2 clutch · R2 gas · right stick ↓ brake · L1/R1 shift · △ ignition · ✕ handbrake · D-pad ↑ debug
+      <b>DualSense</b> L2 clutch · R2 gas · right stick ↓ brake · left stick steer · L1/R1 shift · △ ignition · ✕ handbrake · Options restart
       <br />
-      <b>Keyboard</b> Space clutch (hold Shift to release slowly) · W gas · S brake · Q/E shift · I ignition · X handbrake · ` debug
+      <b>Keyboard</b> Space clutch (hold Shift to release slowly) · W gas · S brake · A/D steer · Q/E shift · I ignition · X handbrake · R restart
     </div>
 
     <div id="debug" class="hidden">
@@ -37,14 +63,16 @@
     <div id="overlay">
       <div class="card">
         <h1>UpShift</h1>
-        <p class="tag">A manual car. Feel the clutch bite.</p>
+        <p class="tag">A manual car on a mountain road.</p>
+        <p>You score for driving well, not fast: clean, rev-matched shifts build your combo, heel-toe downshifts earn bonuses, and stalls, grinds and rail hits cost you. Your skill score turns into creds at the finish.</p>
         <p>Plug in or pair your controller, then click to start. Chrome or Edge recommended for rumble.</p>
         <ol>
           <li>Start the engine with △.</li>
           <li>Hold L2 (clutch in) and press R1 for first gear.</li>
           <li>Ease off L2 slowly with a little R2. Feel for the bite.</li>
+          <li>Blip R2 on downshifts to match the revs.</li>
         </ol>
-        <button>Click to start</button>
+        <button id="start-btn" disabled>Building the mountain…</button>
       </div>
     </div>
 

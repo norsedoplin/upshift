@@ -14,7 +14,7 @@ export class Haptics {
   enabled = true;
   strong = 0;
   weak = 0;
-  private jolt = 0; // decaying one-shot impulses
+  private impulse = 0; // decaying one-shot jolts
   private buzz = 0;
   private lastSent = 0;
   private lastStrong = -1;
@@ -22,19 +22,22 @@ export class Haptics {
   private t = 0;
 
   stall() {
-    this.jolt = Math.max(this.jolt, 1);
+    this.impulse = Math.max(this.impulse, 1);
   }
   grind() {
     this.buzz = Math.max(this.buzz, 1);
   }
+  jolt(strength: number) {
+    this.impulse = Math.max(this.impulse, strength);
+  }
   lock(slip: number) {
     // A clutch that snaps shut with a big speed difference is a thump.
-    this.jolt = Math.max(this.jolt, Math.min(0.9, slip / 60));
+    this.impulse = Math.max(this.impulse, Math.min(0.9, slip / 60));
   }
 
-  update(dt: number, car: Car, pad: Gamepad | null) {
+  update(dt: number, car: Car, pad: Gamepad | null, tyreSlip = 0) {
     this.t += dt;
-    this.jolt *= Math.exp(-dt / 0.12);
+    this.impulse *= Math.exp(-dt / 0.12);
     this.buzz *= Math.exp(-dt / 0.08);
 
     // Friction power in the clutch: highest right at the bite point while slipping.
@@ -53,8 +56,10 @@ export class Haptics {
     // Subtle idle buzz so a running engine is felt; much quieter than the bite.
     const idle = car.running ? 0.03 + (rpm / 7000) * 0.1 : car.cranking ? 0.25 : 0;
 
-    this.strong = clamp01(bite * 0.85 + lug * 0.6 + this.jolt);
-    this.weak = clamp01(idle + bite * 0.3 + this.buzz * 0.9 + lug * 0.2);
+    this.strong = clamp01(bite * 0.85 + lug * 0.6 + this.impulse);
+    // Tyres near and past their grip limit: a fine buzz you can drive by.
+    const scrub = Math.max(0, Math.min(1, (tyreSlip - 0.08) / 0.2)) * (0.6 + 0.4 * Math.sin(this.t * 2 * Math.PI * 23));
+    this.weak = clamp01(idle + bite * 0.3 + this.buzz * 0.9 + lug * 0.2 + scrub * 0.45);
 
     if (!this.enabled || !pad) return;
     const act = (pad as unknown as { vibrationActuator?: Actuator }).vibrationActuator;
