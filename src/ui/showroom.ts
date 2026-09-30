@@ -49,7 +49,7 @@ export class Showroom {
 
   show(body: BodyShape, paint: string) {
     this.holder.clear();
-    const { group, paintMat } = buildCarModel(body, new THREE.Color(paint));
+    const { group, paintMat } = buildCarModel(body, new THREE.Color(paint), { lightsUp: true });
     this.paintMat = paintMat;
     this.holder.add(group);
   }

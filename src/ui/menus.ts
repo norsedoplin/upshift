@@ -4,7 +4,7 @@
 import { CARS, PAINTS, carById, type CarModel } from '../cars';
 import type { MenuNav } from '../input';
 import type { Progress, Settings } from '../game/progress';
-import { GRAPHICS_QUALITIES, saveProgress } from '../game/progress';
+import { GRAPHICS_QUALITIES, SPEEDO_MODES, saveProgress } from '../game/progress';
 import { chooseCar, choosePaint, ownsCar, ownsPaint, paintFor } from '../game/shop';
 import type { RunStats } from '../game/scoring';
 
@@ -322,8 +322,9 @@ export class Menus {
     const fovs = Array.from({ length: 11 }, (_, i) => 50 + i * 5);
     option('Field of view', 4, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
     option('Graphics', 5, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
-    option('Control hints', 6, ['On', 'Off'], st.hints ? 0 : 1, (i) => (st.hints = i === 0));
-    list.append(this.button('Back', 7, () => this.back()));
+    option('On-screen speedo', 6, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
+    option('Control hints', 7, ['On', 'Off'], st.hints ? 0 : 1, (i) => (st.hints = i === 0));
+    list.append(this.button('Back', 8, () => this.back()));
     panel.append(list, this.controlsHint());
   }
 

@@ -9,7 +9,11 @@ export interface Settings {
   camera: CameraView;
   fov: number; // degrees, horizontal screens; portrait screens add 20
   graphics: GraphicsQuality;
+  speedo: SpeedoMode; // on-screen speedo; auto = only when the dash is out of view
 }
+
+export type SpeedoMode = 'auto' | 'on' | 'off';
+export const SPEEDO_MODES: SpeedoMode[] = ['auto', 'on', 'off'];
 
 export type GraphicsQuality = 'low' | 'medium' | 'high';
 export const GRAPHICS_QUALITIES: GraphicsQuality[] = ['low', 'medium', 'high'];
@@ -40,7 +44,7 @@ export interface Progress {
 
 const KEY = 'upshift.progress.v1';
 
-export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high' };
+export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high', speedo: 'auto' };
 
 export function defaultProgress(): Progress {
   return {
@@ -57,7 +61,10 @@ export function defaultProgress(): Progress {
 }
 
 /** Creds handed out once per save. The playtest grant lets testers try every car. */
-export const GRANTS: { id: string; creds: number }[] = [{ id: 'playtest-1', creds: 6000 }];
+export const GRANTS: { id: string; creds: number }[] = [
+  { id: 'playtest-1', creds: 6000 },
+  { id: 'playtest-2', creds: 6000 }, // for the Raijin and the reworked cars
+];
 
 /** Give any grants this save hasn't had yet. Returns true if something was added. */
 export function applyGrants(p: Progress) {
@@ -98,6 +105,7 @@ export function parseProgress(raw: string | null): Progress {
       camera: CAMERA_VIEWS.includes(st.camera) ? st.camera : DEFAULT_SETTINGS.camera,
       fov: Math.round(Math.min(100, Math.max(50, num(st.fov, DEFAULT_SETTINGS.fov))) / 5) * 5,
       graphics: GRAPHICS_QUALITIES.includes(st.graphics) ? st.graphics : p.settings.graphics,
+      speedo: SPEEDO_MODES.includes(st.speedo) ? st.speedo : DEFAULT_SETTINGS.speedo,
     };
   } catch {
     // Corrupt data: start fresh rather than crash.

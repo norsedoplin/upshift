@@ -3,19 +3,19 @@
 import { HATCHBACK, type CarSpec } from './sim/car';
 import { HATCHBACK_CHASSIS, type ChassisSpec } from './sim/chassis';
 
+/** Which body the model builder draws; each has its own profile and details (see ui/carModel.ts). */
+export type CarDesign = 'hatch' | 'ae86' | 's14' | 'fd';
+
 export interface BodyShape {
+  design: CarDesign;
   length: number;
   width: number;
-  height: number; // lower body
-  cabinLength: number;
+  height: number; // lower body, from the underbody to the beltline
   cabinHeight: number;
-  cabinOffset: number; // + towards the rear
   wheelRadius: number;
-  style: 'hatch' | 'coupe' | 'sedan';
-  spoiler?: 'roof' | 'ducktail' | 'wing';
-  flares?: boolean;
-  exhausts: 1 | 2;
 }
+
+export type EngineSound = 4 | 6 | 'rotary';
 
 /** What the driver sees from the seat. */
 export interface InteriorSpec {
@@ -40,7 +40,7 @@ export interface CarModel {
   body: BodyShape;
   interior: InteriorSpec;
   defaultPaint: string;
-  cylinders: 4 | 6;
+  cylinders: EngineSound;
   stats: { power: number; weight: number; grip: number; drive: 'FWD' | 'RWD' };
 }
 
@@ -61,6 +61,9 @@ export const PAINTS: Paint[] = [
   { id: 'ice', name: 'Ice blue', color: '#8ec9e8', price: 300 },
   { id: 'black', name: 'Gloss black', color: '#15161a', price: 350 },
   { id: 'candy', name: 'Candy purple', color: '#6b2f8f', price: 400 },
+  { id: 'rosso', name: 'Rotary red', color: '#b5161c', price: 0 },
+  { id: 'lime', name: 'Lime pearl', color: '#9fc23a', price: 300 },
+  { id: 'bronze', name: 'Bronze', color: '#8a5a2b', price: 350 },
 ];
 
 const HATCH: CarModel = {
@@ -70,7 +73,7 @@ const HATCH: CarModel = {
   price: 0,
   spec: HATCHBACK,
   chassis: HATCHBACK_CHASSIS,
-  body: { length: 3.9, width: 1.7, height: 0.72, cabinLength: 2.1, cabinHeight: 0.62, cabinOffset: 0.45, wheelRadius: 0.3, style: 'hatch', spoiler: 'roof', exhausts: 1 },
+  body: { design: 'hatch', length: 3.9, width: 1.7, height: 0.72, cabinHeight: 0.62, wheelRadius: 0.3 },
   interior: { seatDrop: 0, hoodLength: 1.3, hoodBulge: false, trim: '#2b2d33', trimLight: '#3a3d45', accent: '#5a5e68', wheel: 'three', cage: false, gaugePod: false },
   defaultPaint: 'coral',
   cylinders: 4,
@@ -80,22 +83,22 @@ const HATCH: CarModel = {
 const KITSUNE: CarModel = {
   id: 'kitsune',
   name: 'Kitsune',
-  blurb: 'Light rear-drive coupe with a screaming 8,000 rpm four. Heel-toe heaven.',
+  blurb: 'The mountain-pass legend. Light rear-drive hatch, pop-up lights and a twin-cam four that sings to 7,600 rpm.',
   price: 1500,
   spec: {
     ...HATCHBACK,
-    mass: 950,
+    mass: 940,
     gears: { [-1]: -3.48, 1: 3.587, 2: 2.022, 3: 1.384, 4: 1.0, 5: 0.861 },
     finalDrive: 4.3,
     dragArea: 0.66,
     brakeForce: 8800,
     engineInertia: 0.13,
     torqueCurve: [
-      [0, 0], [200, 22], [400, 50], [600, 66], [1000, 92], [2000, 112], [3000, 124],
-      [4000, 134], [5000, 144], [6000, 150], [6800, 148], [7600, 136], [8400, 100],
+      [0, 0], [200, 22], [400, 50], [600, 66], [1000, 90], [2000, 110], [3000, 122],
+      [4000, 134], [5000, 145], [5800, 149], [6600, 144], [7400, 130], [8200, 96],
     ],
     idleRpm: 900,
-    revLimit: 7800,
+    revLimit: 7600,
     clutchMaxTorque: 250,
     biteStart: 0.36,
     biteEnd: 0.74,
@@ -110,34 +113,34 @@ const KITSUNE: CarModel = {
     rearGrip: 1.06,
     drivenAxle: 'rear',
   },
-  body: { length: 4.2, width: 1.63, height: 0.66, cabinLength: 1.9, cabinHeight: 0.56, cabinOffset: 0.2, wheelRadius: 0.29, style: 'coupe', spoiler: 'ducktail', exhausts: 1 },
+  body: { design: 'ae86', length: 4.18, width: 1.63, height: 0.62, cabinHeight: 0.53, wheelRadius: 0.29 },
   interior: { seatDrop: 0.1, hoodLength: 1.75, hoodBulge: false, trim: '#222326', trimLight: '#303236', accent: '#c23b2e', wheel: 'dish', cage: true, gaugePod: false },
   defaultPaint: 'snow',
   cylinders: 4,
-  stats: { power: 0.55, weight: 0.3, grip: 0.6, drive: 'RWD' },
+  stats: { power: 0.45, weight: 0.25, grip: 0.55, drive: 'RWD' },
 };
 
 const RONIN: CarModel = {
   id: 'ronin',
   name: 'Ronin',
-  blurb: 'Turbo straight-six, six speeds, rear drive. Big torque, needs respect.',
-  price: 4000,
+  blurb: 'Turbo two-litre coupe, rear drive, five speeds. Waits for boost, then pulls hard. Built to slide.',
+  price: 3000,
   spec: {
     ...HATCHBACK,
-    mass: 1260,
-    wheelRadius: 0.32,
-    gears: { [-1]: -3.4, 1: 3.63, 2: 2.19, 3: 1.54, 4: 1.21, 5: 1.0, 6: 0.79 },
-    finalDrive: 3.7,
+    mass: 1240,
+    wheelRadius: 0.31,
+    gears: { [-1]: -3.38, 1: 3.321, 2: 1.902, 3: 1.308, 4: 1.0, 5: 0.759 },
+    finalDrive: 4.08,
     dragArea: 0.62,
     brakeForce: 12500,
-    engineInertia: 0.2,
+    engineInertia: 0.17,
     torqueCurve: [
-      [0, 0], [200, 30], [400, 70], [600, 95], [1000, 140], [2000, 210], [2800, 290],
-      [3500, 310], [4500, 305], [5500, 285], [6500, 250], [7200, 200], [7800, 150],
+      [0, 0], [200, 26], [400, 60], [600, 82], [1000, 118], [2000, 165], [2800, 225],
+      [3500, 268], [4000, 275], [5000, 268], [6000, 245], [7000, 205], [7800, 150],
     ],
     idleRpm: 800,
-    revLimit: 7000,
-    clutchMaxTorque: 480,
+    revLimit: 7500,
+    clutchMaxTorque: 420,
     biteStart: 0.3,
     biteEnd: 0.72,
     starterTorque: 70,
@@ -153,14 +156,57 @@ const RONIN: CarModel = {
     rearGrip: 1.08,
     drivenAxle: 'rear',
   },
-  body: { length: 4.5, width: 1.8, height: 0.68, cabinLength: 2.0, cabinHeight: 0.58, cabinOffset: 0.3, wheelRadius: 0.33, style: 'sedan', spoiler: 'wing', flares: true, exhausts: 2 },
-  interior: { seatDrop: 0.05, hoodLength: 1.9, hoodBulge: true, trim: '#262320', trimLight: '#3d352d', accent: '#7a5634', wheel: 'four', cage: false, gaugePod: true },
+  body: { design: 's14', length: 4.52, width: 1.73, height: 0.64, cabinHeight: 0.49, wheelRadius: 0.31 },
+  interior: { seatDrop: 0.06, hoodLength: 1.85, hoodBulge: false, trim: '#27292e', trimLight: '#3a3d44', accent: '#8a8f99', wheel: 'four', cage: false, gaugePod: true },
   defaultPaint: 'midnight',
-  cylinders: 6,
-  stats: { power: 0.9, weight: 0.7, grip: 0.75, drive: 'RWD' },
+  cylinders: 4,
+  stats: { power: 0.72, weight: 0.6, grip: 0.72, drive: 'RWD' },
 };
 
-export const CARS: CarModel[] = [HATCH, KITSUNE, RONIN];
+const RAIJIN: CarModel = {
+  id: 'raijin',
+  name: 'Raijin',
+  blurb: 'Low, curvy and twin-turbo rotary. Revs to 8,000 with a brap all its own. Rewards a careful right foot.',
+  price: 5500,
+  spec: {
+    ...HATCHBACK,
+    mass: 1280,
+    wheelRadius: 0.32,
+    gears: { [-1]: -3.49, 1: 3.483, 2: 2.015, 3: 1.391, 4: 1.0, 5: 0.719 },
+    finalDrive: 4.1,
+    dragArea: 0.56,
+    brakeForce: 13500,
+    engineInertia: 0.12,
+    torqueCurve: [
+      [0, 0], [200, 24], [400, 55], [600, 78], [1000, 110], [2000, 170], [3000, 230],
+      [4000, 280], [5000, 294], [6000, 290], [7000, 268], [7800, 230], [8600, 160],
+    ],
+    idleRpm: 850,
+    revLimit: 8000,
+    clutchMaxTorque: 460,
+    biteStart: 0.32,
+    biteEnd: 0.7,
+    starterTorque: 60,
+  },
+  chassis: {
+    ...HATCHBACK_CHASSIS,
+    cgToFront: 1.2,
+    cgToRear: 1.225,
+    cgHeight: 0.44,
+    yawInertia: 1750,
+    mu: 1.08,
+    frontBrakeBias: 0.63,
+    rearGrip: 1.08,
+    drivenAxle: 'rear',
+  },
+  body: { design: 'fd', length: 4.28, width: 1.76, height: 0.57, cabinHeight: 0.5, wheelRadius: 0.32 },
+  interior: { seatDrop: 0.12, hoodLength: 1.8, hoodBulge: false, trim: '#1d1e21', trimLight: '#2c2d31', accent: '#b5161c', wheel: 'three', cage: false, gaugePod: false },
+  defaultPaint: 'rosso',
+  cylinders: 'rotary',
+  stats: { power: 0.9, weight: 0.62, grip: 0.82, drive: 'RWD' },
+};
+
+export const CARS: CarModel[] = [HATCH, KITSUNE, RONIN, RAIJIN];
 
 export function carById(id: string) {
   return CARS.find((c) => c.id === id) ?? HATCH;
