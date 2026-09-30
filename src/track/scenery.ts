@@ -8,6 +8,7 @@ import { LOT_RAMP, type Road, type RoadSample } from './touge';
 import type { DayTargets } from './daylight';
 import { CARS } from '../cars';
 import { buildCarModel } from '../ui/carModel';
+import { smoothShade } from '../smooth';
 
 function hash(x: number, y: number) {
   const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
@@ -33,6 +34,7 @@ const ROCK_LIGHT = new THREE.Color('#a8a296');
 const GRASS = new THREE.Color('#8dbd58');
 const GRASS_DARK = new THREE.Color('#679a45');
 const DRY_GRASS = new THREE.Color('#aeb162');
+const FOREST_FLOOR = new THREE.Color('#566f3a');
 
 const smooth = (t: number) => {
   const x = Math.min(1, Math.max(0, t));
@@ -106,6 +108,7 @@ export class Terrain {
 
 export interface Scenery {
   terrain: Terrain;
+  trees: THREE.Object3D;
   sun: THREE.DirectionalLight;
   /** Sky and ground only, baked into reflections. */
   envScene: THREE.Scene;
@@ -143,14 +146,18 @@ export function buildScenery(scene: THREE.Scene, road: Road): Scenery {
   scene.add(buildRails(road, terrain));
   scene.add(buildDelineators(road, terrain));
   scene.add(buildChevrons(road));
-  scene.add(buildTrees(road, terrain, bounds));
+  const trees = buildTrees(road, terrain, bounds);
+  scene.add(trees);
   scene.add(buildRocks(road, terrain, bounds));
   scene.add(buildGantry(road, road.startS, 'START'));
   scene.add(buildGantry(road, road.finishS, 'FINISH'));
   scene.add(mountains.group);
   scene.add(clouds);
+  // Mid-poly shading over everything built above (the terrain is smooth already).
+  smoothShade(scene, 42);
   return {
     terrain,
+    trees,
     sun,
     envScene: env.scene,
     day: {
@@ -255,54 +262,56 @@ function buildSky() {
 }
 
 function buildTerrainMesh(terrain: Terrain, b: Bounds) {
-  const cell = 9;
+  // A shared-vertex grid with smooth normals: rolling hills rather than facets. Colour is
+  // worked out per vertex from the slope, so grass fades into rock across a face.
+  const cell = 6;
   const nx = Math.ceil((b.maxX - b.minX) / cell);
   const nz = Math.ceil((b.maxZ - b.minZ) / cell);
-  const heights = new Float32Array((nx + 1) * (nz + 1));
+  const pos = new Float32Array((nx + 1) * (nz + 1) * 3);
   for (let j = 0; j <= nz; j++)
     for (let i = 0; i <= nx; i++) {
       // Jitter vertices a little so the grid doesn't read as a grid.
       const x = b.minX + i * cell + (hash(i, j) - 0.5) * cell * 0.5;
       const z = b.minZ + j * cell + (hash(j, i + 7) - 0.5) * cell * 0.5;
-      heights[j * (nx + 1) + i] = terrain.height(x, z);
+      const k = (j * (nx + 1) + i) * 3;
+      pos[k] = x;
+      pos[k + 1] = terrain.height(x, z);
+      pos[k + 2] = z;
     }
-  const pos: number[] = [];
-  const col: number[] = [];
-  const c = new THREE.Color();
-  const vx = (i: number, j: number) => b.minX + i * cell + (hash(i, j) - 0.5) * cell * 0.5;
-  const vz = (i: number, j: number) => b.minZ + j * cell + (hash(j, i + 7) - 0.5) * cell * 0.5;
-  const tri = (a: number[], bb: number[], cc: number[]) => {
-    const pts = [a, bb, cc].map(([i, j]) => [vx(i, j), heights[j * (nx + 1) + i], vz(i, j)]);
-    pos.push(...pts[0], ...pts[1], ...pts[2]);
-    // Colour by steepness: grass on gentle ground, rock on steep faces.
-    const e1 = new THREE.Vector3(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]);
-    const e2 = new THREE.Vector3(pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2]);
-    const ny = Math.abs(e1.cross(e2).normalize().y);
-    const cx = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
-    const cz = (pts[0][2] + pts[1][2] + pts[2][2]) / 3;
-    const jitter = 0.94 + hash(Math.floor(cx * 3), Math.floor(cz * 3)) * 0.1;
-    if (ny < 0.72) {
-      c.copy(ROCK).lerp(ROCK_LIGHT, hash(cx, cz));
-    } else {
-      // Meadows in patches: lush, darker and sun-dried grass blend over tens of metres.
-      c.copy(GRASS).lerp(GRASS_DARK, smooth((valueNoise(cx / 70, cz / 70) - 0.35) * 2.5));
-      c.lerp(DRY_GRASS, smooth((valueNoise(cx / 45 + 9, cz / 45 - 4) - 0.6) * 3) * 0.55);
-      // Steeper grass fades towards rock.
-      c.lerp(ROCK, smooth((0.9 - ny) / 0.18) * 0.35);
-    }
-    c.multiplyScalar(jitter);
-    for (let k = 0; k < 3; k++) col.push(c.r, c.g, c.b);
-  };
+  const index: number[] = [];
+  const id = (i: number, j: number) => j * (nx + 1) + i;
   for (let j = 0; j < nz; j++)
     for (let i = 0; i < nx; i++) {
-      tri([i, j], [i, j + 1], [i + 1, j]);
-      tri([i + 1, j], [i, j + 1], [i + 1, j + 1]);
+      index.push(id(i, j), id(i, j + 1), id(i + 1, j));
+      index.push(id(i + 1, j), id(i, j + 1), id(i + 1, j + 1));
     }
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(index);
   geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 }));
+  const nrm = geo.attributes.normal;
+  const col = new Float32Array(pos.length);
+  const c = new THREE.Color();
+  for (let v = 0; v < nrm.count; v++) {
+    const ny = Math.abs(nrm.getY(v));
+    const cx = pos[v * 3];
+    const cz = pos[v * 3 + 2];
+    const rock = smooth((0.8 - ny) / 0.12);
+    // Meadows in patches: lush, darker and sun-dried grass blend over tens of metres.
+    c.copy(GRASS).lerp(GRASS_DARK, smooth((valueNoise(cx / 70, cz / 70) - 0.35) * 2.5));
+    c.lerp(DRY_GRASS, smooth((valueNoise(cx / 45 + 9, cz / 45 - 4) - 0.6) * 3) * 0.55);
+    // Forest floor: darker, mossy ground where the trees are thick.
+    c.lerp(FOREST_FLOOR, smooth((valueNoise(cx / 90, cz / 90) - 0.4) * 4) * 0.5);
+    c.lerp(new THREE.Color(ROCK).lerp(ROCK_LIGHT, hash(Math.floor(cx), Math.floor(cz))), rock);
+    c.multiplyScalar(0.95 + (valueNoise(cx / 6, cz / 6) - 0.5) * 0.12);
+    col[v * 3] = c.r;
+    col[v * 3 + 1] = c.g;
+    col[v * 3 + 2] = c.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
+  mat.userData.keepFlat = true; // already smooth; skip the crease pass
+  const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   mesh.castShadow = true;
   return mesh;
@@ -408,7 +417,16 @@ function buildRoadMesh(road: Road) {
 
 function buildRails(road: Road, terrain: Terrain) {
   const postGeo = new THREE.BoxGeometry(0.1, 0.75, 0.1);
-  const beamGeo = new THREE.BoxGeometry(0.06, 0.28, 1);
+  // The rail itself has the classic W-beam profile: two ribs you can see catch the light.
+  const w: THREE.Vector2[] = [];
+  const back: THREE.Vector2[] = [];
+  for (let i = 0; i <= 16; i++) {
+    const y = -0.15 + (i / 16) * 0.3;
+    const x = 0.03 * Math.abs(Math.sin((i / 16) * Math.PI * 2));
+    w.push(new THREE.Vector2(x + 0.006, y));
+    back.unshift(new THREE.Vector2(x - 0.006, y));
+  }
+  const beamGeo = new THREE.ExtrudeGeometry(new THREE.Shape([...w, ...back]), { depth: 1, bevelEnabled: false }).translate(0, 0, -0.5);
   const mat = new THREE.MeshStandardMaterial({ color: '#d4d6d8', metalness: 0.65, roughness: 0.38 });
   const posts: THREE.Matrix4[] = [];
   const beams: THREE.Matrix4[] = [];
@@ -669,31 +687,71 @@ function buildDelineators(road: Road, terrain: Terrain) {
 
 /** A pine as three stacked cones, so it reads as a tree rather than a single spike. */
 function pineGeometry() {
+  // Four drooping tiers with a ragged edge, so the silhouette reads as a conifer, not a stack of cones.
   const tiers = [
-    [1.6, 2.1, -1.1],
-    [1.25, 1.9, 0.05],
-    [0.85, 1.7, 1.15],
-  ].map(([r, h, y]) => new THREE.ConeGeometry(r, h, 7).translate(0, y, 0).toNonIndexed());
+    [1.75, 1.9, -1.35],
+    [1.45, 1.8, -0.35],
+    [1.1, 1.65, 0.6],
+    [0.7, 1.5, 1.5],
+  ].map(([r, h, y], t) => {
+    const cone = new THREE.ConeGeometry(r, h, 10, 1).toNonIndexed();
+    const p = cone.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i);
+      const yy = p.getY(i);
+      const z = p.getZ(i);
+      const rim = yy < -h / 2 + 0.01;
+      if (rim) {
+        // Tips of the branches hang down a little and vary in length.
+        const a = Math.atan2(z, x);
+        const k = 1 + 0.12 * Math.sin(a * 5 + t * 1.7);
+        p.setXYZ(i, x * k, yy - 0.18 * k, z * k);
+      }
+    }
+    return cone.translate(0, y, 0);
+  });
   const geo = mergeGeometries(tiers)!;
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/** A broadleaf crown: a few overlapping lumpy blobs. */
+function broadleafGeometry() {
+  const blobs = [
+    [0, 0, 0, 1.7],
+    [0.9, -0.35, 0.3, 1.15],
+    [-0.8, -0.2, -0.45, 1.2],
+  ].map(([x, y, z, r], n) => {
+    const g = new THREE.IcosahedronGeometry(r, 1);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const vx = p.getX(i);
+      const vy = p.getY(i);
+      const vz = p.getZ(i);
+      const k = 0.9 + valueNoise(vx * 1.7 + n * 5, vy * 1.7 + vz * 1.3) * 0.22;
+      p.setXYZ(i, vx * k, vy * k * 0.85, vz * k);
+    }
+    return g.translate(x, y, z);
+  });
+  const geo = mergeGeometries(blobs)!;
   geo.computeVertexNormals();
   return geo;
 }
 
 function buildTrees(road: Road, terrain: Terrain, b: Bounds) {
   const group = new THREE.Group();
-  const trunkGeo = new THREE.CylinderGeometry(0.18, 0.25, 1.6, 5);
+  const trunkGeo = new THREE.CylinderGeometry(0.16, 0.26, 1.6, 8);
   const crownGeo = pineGeometry();
-  const roundGeo = new THREE.IcosahedronGeometry(1.8, 1);
-  // Squash the broadleaf crowns a little and rough them up so each facet catches light differently.
-  const rp = roundGeo.attributes.position;
-  for (let i = 0; i < rp.count; i++) {
-    const x = rp.getX(i);
-    const y = rp.getY(i);
-    const z = rp.getZ(i);
-    const k = 0.88 + hash(Math.round(x * 10), Math.round(y * 10 + z * 7)) * 0.24;
-    rp.setXYZ(i, x * k, y * k * 0.85, z * k);
-  }
-  roundGeo.computeVertexNormals();
+  const roundGeo = broadleafGeometry();
+  // Far away the trees swap to simple versions: nobody can tell at 200 m, and the GPU can.
+  const crownFar = mergeGeometries(
+    [
+      [1.6, 2.1, -1.1],
+      [1.25, 1.9, 0.05],
+      [0.85, 1.7, 1.15],
+    ].map(([r, h, y]) => new THREE.ConeGeometry(r, h, 6).translate(0, y, 0).toNonIndexed()),
+  )!;
+  const roundFar = new THREE.IcosahedronGeometry(1.8, 0).scale(1, 0.85, 1);
   const trunkMat = new THREE.MeshStandardMaterial({ color: '#7a5a3f', flatShading: true, roughness: 1 });
   const pineMat = new THREE.MeshStandardMaterial({ color: '#ffffff', flatShading: true, roughness: 0.9 });
   const leafMat = new THREE.MeshStandardMaterial({ color: '#ffffff', flatShading: true, roughness: 0.9 });
@@ -748,15 +806,20 @@ function buildTrees(road: Road, terrain: Terrain, b: Bounds) {
   const up = new THREE.Vector3(0, 1, 0);
   const pos = new THREE.Vector3();
   const scl = new THREE.Vector3();
+  const lod: TreeTile[] = [];
   for (const list of tiles.values()) {
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, list.length);
     const pines = new THREE.InstancedMesh(crownGeo, pineMat, list.length);
     const rounds = new THREE.InstancedMesh(roundGeo, leafMat, list.length);
+    let cx = 0;
+    let cz = 0;
     let t = 0;
     let p = 0;
     let r = 0;
     for (const i of list) {
       const { x, z, big } = spots[i];
+      cx += x / list.length;
+      cz += z / list.length;
       const y = terrain.height(x, z);
       const sc = (big ? 0.95 : 0.75) + hash(i, 4) * (big ? 0.85 : 0.6);
       q.setFromAxisAngle(up, hash(i, 5) * 6.28);
@@ -777,20 +840,69 @@ function buildTrees(road: Road, terrain: Terrain, b: Bounds) {
     trunks.count = t;
     pines.count = p;
     rounds.count = r;
-    for (const im of [trunks, pines, rounds]) {
+    // The far set shares the near set's instance data.
+    const pinesFar = new THREE.InstancedMesh(crownFar, pineMat, list.length);
+    const roundsFar = new THREE.InstancedMesh(roundFar, leafMat, list.length);
+    for (const [far, near] of [
+      [pinesFar, pines],
+      [roundsFar, rounds],
+    ] as const) {
+      far.instanceMatrix = near.instanceMatrix;
+      far.instanceColor = near.instanceColor;
+      far.count = near.count;
+    }
+    const near = new THREE.Group();
+    const farG = new THREE.Group();
+    for (const [im, into] of [
+      [trunks, group],
+      [pines, near],
+      [rounds, near],
+      [pinesFar, farG],
+      [roundsFar, farG],
+    ] as const) {
       if (!im.count) continue;
       im.castShadow = true;
       im.receiveShadow = true;
       im.computeBoundingSphere();
-      group.add(im);
+      into.add(im);
     }
+    farG.visible = false;
+    group.add(near, farG);
+    lod.push({ x: cx, z: cz, near, far: farG });
   }
+  group.userData.lod = lod;
   return group;
+}
+
+interface TreeTile {
+  x: number;
+  z: number;
+  near: THREE.Group;
+  far: THREE.Group;
+}
+
+/** Detailed trees near the camera, simple ones further out. Cheap enough to call every frame. */
+export function updateTreeDetail(trees: THREE.Object3D, camera: THREE.Vector3) {
+  for (const t of trees.userData.lod as TreeTile[]) {
+    const near = (t.x - camera.x) ** 2 + (t.z - camera.z) ** 2 < 260 * 260;
+    t.near.visible = near;
+    t.far.visible = !near;
+  }
 }
 
 /** Boulders scattered on the hillsides, a few close to the verge. */
 function buildRocks(road: Road, terrain: Terrain, b: Bounds) {
-  const geo = new THREE.DodecahedronGeometry(1, 0);
+  // Weathered boulders: a subdivided ball pushed about by noise.
+  const geo = new THREE.IcosahedronGeometry(1, 2);
+  const gp = geo.attributes.position;
+  for (let i = 0; i < gp.count; i++) {
+    const x = gp.getX(i);
+    const y = gp.getY(i);
+    const z = gp.getZ(i);
+    const k = 0.78 + valueNoise(x * 1.6 + 3, y * 1.6 + z * 1.2) * 0.4;
+    gp.setXYZ(i, x * k, y * k, z * k);
+  }
+  geo.computeVertexNormals();
   const mat = new THREE.MeshStandardMaterial({ color: '#ffffff', flatShading: true, roughness: 0.95 });
   const N = 900;
   const rocks = new THREE.InstancedMesh(geo, mat, N);
@@ -881,7 +993,7 @@ function buildMountains(b: Bounds) {
     const a = (i / 26) * Math.PI * 2 + hash(i, 30) * 0.2;
     const d = 1500 + hash(i, 31) * 200;
     const h = 120 + hash(i, 32) * 160;
-    const mtn = new THREE.Mesh(craggy(new THREE.ConeGeometry(h * 2, h, 7, 2), i), ridge);
+    const mtn = new THREE.Mesh(craggy(new THREE.ConeGeometry(h * 2, h, 12, 4), i, 0.09), ridge);
     mtn.position.set(cx + Math.cos(a) * d, h / 2 - 60, cz + Math.sin(a) * d);
     mtn.rotation.y = hash(i, 33) * 3;
     group.add(mtn);
@@ -893,8 +1005,8 @@ function buildMountains(b: Bounds) {
     const a = (i / 30) * Math.PI * 2 + hash(i, 8) * 0.2;
     const d = 2100 + hash(i, 9) * 300;
     const h = 260 + hash(i, 10) * 420;
-    const segs = 5 + Math.floor(hash(i, 11) * 3);
-    const geo = craggy(new THREE.ConeGeometry(h * 1.3, h, segs, 4), i + 50);
+    const segs = 9 + Math.floor(hash(i, 11) * 4);
+    const geo = craggy(new THREE.ConeGeometry(h * 1.3, h, segs, 7), i + 50, 0.1);
     // Snow on the upper faces of the tall peaks, with a ragged snowline.
     const p = geo.attributes.position;
     const col: number[] = [];
@@ -943,7 +1055,7 @@ function craggy(geo: THREE.BufferGeometry, seed: number, amount = 0.12) {
 
 /** Soft low-poly clouds drifting high over the far hills. */
 function buildClouds(b: Bounds) {
-  const geo = new THREE.IcosahedronGeometry(1, 1);
+  const geo = new THREE.IcosahedronGeometry(1, 3);
   const mat = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#dfe6ee', emissiveIntensity: 0.3, flatShading: true, fog: false, roughness: 1, envMapIntensity: 0.3 });
   const puffs: THREE.Matrix4[] = [];
   const cx = (b.minX + b.maxX) / 2;

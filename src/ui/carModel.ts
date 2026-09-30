@@ -10,6 +10,7 @@
 
 import * as THREE from 'three';
 import type { BodyShape, CarDesign } from '../cars';
+import { smoothShade } from '../smooth';
 
 type P = [number, number]; // (z, y) in the side view
 type UV = [number, number]; // (u along the length from the nose 0..1, v = height above the underbody / body height)
@@ -382,7 +383,7 @@ export function buildCarModel(body: BodyShape, paint: THREE.Color, opts: CarMode
   const extrude = (pts: P[], width: number, bevel: number, steps = 1) => {
     const shape = new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y)));
     const depth = Math.max(0.01, width - 2 * bevel);
-    const geo = new THREE.ExtrudeGeometry(shape, { depth, steps, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.8, bevelSegments: 1 });
+    const geo = new THREE.ExtrudeGeometry(shape, { depth, steps, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.8, bevelSegments: 3 });
     geo.translate(0, 0, -depth / 2);
     geo.rotateY(-Math.PI / 2); // shape x -> z (along the car), extrusion -> x (across)
     return geo;
@@ -453,7 +454,7 @@ export function buildCarModel(body: BodyShape, paint: THREE.Color, opts: CarMode
 
   // ---- Lower body ----
   const lower: P[] = [[at(d.bottomFront), rh], ...top.map(([u, v]) => [at(u), rh + v * H] as P), [at(d.bottomRear), rh]];
-  const bodyGeo = extrude(lower, W, BODY_BEVEL, 10);
+  const bodyGeo = extrude(lower, W, BODY_BEVEL, 16);
   deform(bodyGeo, W);
   add(bodyGeo, paintMat);
 
@@ -471,7 +472,7 @@ export function buildCarModel(body: BodyShape, paint: THREE.Color, opts: CarMode
   };
   const surfaceHalf = (y: number, z: number) => halfG * cabinScale(y, z);
   const cabinPts: P[] = [[cf, belt - 0.03], [rf, roof], [(rf + rr) / 2, roof + arc], [rr, roof], [cr, belt - 0.03]];
-  const cabin = extrude(cabinPts, W * 0.92, CABIN_BEVEL, 6);
+  const cabin = extrude(cabinPts, W * 0.92, CABIN_BEVEL, 10);
   const cp = cabin.attributes.position;
   for (let i = 0; i < cp.count; i++) {
     const x = cp.getX(i);
@@ -561,13 +562,21 @@ export function buildCarModel(body: BodyShape, paint: THREE.Color, opts: CarMode
   // ---- Wheels and arches ----
   const axles = d.axles.map(at);
   const tyreW = 0.22 + R * 0.1;
-  const tyre = new THREE.CylinderGeometry(R, R, tyreW, 20).rotateZ(Math.PI / 2);
+  // Tyre: a turned profile with rounded shoulders and a sidewall bulge, not a plain drum.
   const rimR = R * 0.68;
-  const rimDisc = new THREE.CylinderGeometry(rimR, rimR, 0.02, 20).rotateZ(Math.PI / 2);
-  const lip = new THREE.TorusGeometry(rimR, 0.012, 4, 20).rotateY(Math.PI / 2);
-  const cap = new THREE.CylinderGeometry(R * 0.13, R * 0.13, 0.03, 8).rotateZ(Math.PI / 2);
+  const tyreProfile: THREE.Vector2[] = [];
+  for (let i = 0; i <= 12; i++) {
+    const a = (i / 12) * Math.PI; // around the cross-section, inner sidewall to outer
+    // Flat-ish tread, rounded shoulders: the power flattens the top of the arc.
+    const r = rimR * 0.98 + (R - rimR * 0.98) * Math.sin(a) ** 0.35;
+    tyreProfile.push(new THREE.Vector2(r, (-Math.cos(a) * tyreW) / 2));
+  }
+  const tyre = new THREE.LatheGeometry(tyreProfile, 36).rotateZ(Math.PI / 2);
+  const rimDisc = new THREE.CylinderGeometry(rimR, rimR, 0.02, 32).rotateZ(Math.PI / 2);
+  const lip = new THREE.TorusGeometry(rimR, 0.014, 6, 36).rotateY(Math.PI / 2);
+  const cap = new THREE.CylinderGeometry(R * 0.13, R * 0.13, 0.03, 16).rotateZ(Math.PI / 2);
   const spoke = new THREE.BoxGeometry(0.02, rimR * 0.9, d.spokeWidth);
-  const arch = new THREE.CircleGeometry(R * 1.24, 18, 0, Math.PI);
+  const arch = new THREE.CircleGeometry(R * 1.24, 28, 0, Math.PI);
   const spokeMat = d.rim === 'dark' ? flat('#5b5f66', undefined, 0.35, 0.8) : mats.silver;
   for (const z of axles) {
     const u = (z + f) / L;
@@ -612,6 +621,8 @@ export function buildCarModel(body: BodyShape, paint: THREE.Color, opts: CarMode
   });
 
   d.details(kit);
+  // Mid-poly: rounded bevels and smooth panels, but keep the shut-lines and corners crisp.
+  smoothShade(g, 38);
 
   g.traverse((o) => {
     o.castShadow = true;
