@@ -8,7 +8,7 @@ describe('dualsense reports', () => {
 
   it('builds a USB rumble report', () => {
     const r = rumbleReport(false, 1, 0.5);
-    expect(r.length).toBe(62); // 63 with the report id
+    expect(r.length).toBe(47); // 48 with the report id
     expect(r[0]).toBe(0x02);
     expect(r[38]).toBe(0x04);
     expect(rumbleReport(false, 1, 1, 0, false)[0]).toBe(0x03);
