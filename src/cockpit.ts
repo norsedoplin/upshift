@@ -3,7 +3,9 @@
 // trim colours, steering wheel, a roll cage or extra gauges.
 
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { InteriorSpec } from './cars';
+import { smoothShade } from './smooth';
 
 export const COLORS = {
   skyTop: new THREE.Color('#7fb2d9'),
@@ -57,12 +59,16 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
     parent.add(mesh);
     return mesh;
   };
-  const box = (w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) =>
-    add(new THREE.BoxGeometry(w, h, d), m, x, y, z, rx, ry, rz);
+  // Panels get softly rounded edges; thin trim strips stay plain boxes.
+  const box = (w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) => {
+    const t = Math.min(w, h, d);
+    const geo = t >= 0.035 ? new RoundedBoxGeometry(w, h, d, 2, Math.min(0.035, t * 0.3)) : new THREE.BoxGeometry(w, h, d);
+    return add(geo, m, x, y, z, rx, ry, rz);
+  };
   /** A round bar between two points (roll cage, stalks). */
   const bar = (a: THREE.Vector3, b: THREE.Vector3, r: number, m: THREE.Material) => {
     const len = a.distanceTo(b);
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 6), m);
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 12), m);
     mesh.position.copy(a).add(b).multiplyScalar(0.5);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
     cabin.add(mesh);
@@ -181,19 +187,19 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.012, stickLen, 6), metal);
   stick.position.y = stickLen / 2;
   const knobMat = spec.wheel === 'dish' ? mat('#e8e6df') : dark;
-  const knob = new THREE.Mesh(spec.wheel === 'dish' ? new THREE.SphereGeometry(0.034, 10, 8) : new THREE.IcosahedronGeometry(0.036, 1), knobMat);
+  const knob = new THREE.Mesh(spec.wheel === 'dish' ? new THREE.SphereGeometry(0.034, 16, 12) : new THREE.IcosahedronGeometry(0.036, 2), knobMat);
   knob.position.y = stickLen + 0.012;
   shifter.add(stick, knob);
   cabin.add(shifter);
   // Leather boot around the lever's base, and a surround on the console.
-  add(new THREE.ConeGeometry(tall ? 0.075 : 0.065, tall ? 0.12 : 0.08, 8), tall ? accent : dark, 0.02, 0.66, -0.38);
+  add(new THREE.ConeGeometry(tall ? 0.075 : 0.065, tall ? 0.12 : 0.08, 16), tall ? accent : dark, 0.02, 0.66, -0.38);
   box(0.2, 0.012, 0.2, interiorLight, 0.02, 0.625, -0.38);
 
   // ---- Steering wheel ----
   const wheel = new THREE.Group();
   const radius = spec.wheel === 'dish' ? 0.17 : spec.wheel === 'four' ? 0.19 : 0.185;
   const grip = spec.wheel === 'dish' ? 0.021 : 0.018;
-  wheel.add(new THREE.Mesh(new THREE.TorusGeometry(radius, grip, 6, 22), interior));
+  wheel.add(new THREE.Mesh(new THREE.TorusGeometry(radius, grip, 10, 44), interior));
   const spokeMat = spec.wheel === 'dish' ? metal : interiorLight;
   const spokeAngles =
     spec.wheel === 'four' ? [Math.PI * 0.2, Math.PI * 0.8, Math.PI * 1.3, Math.PI * 1.7] : [0, (2 * Math.PI) / 3, (4 * Math.PI) / 3].map((a) => a - Math.PI / 2);
@@ -223,7 +229,7 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   wheelMount.add(wheel);
   cabin.add(wheelMount);
   // Steering column and indicator/wiper stalks.
-  add(new THREE.CylinderGeometry(0.04, 0.05, 0.22, 8).rotateX(Math.PI / 2 - 0.45), interior, -0.37, 0.72, -0.5);
+  add(new THREE.CylinderGeometry(0.04, 0.05, 0.22, 16).rotateX(Math.PI / 2 - 0.45), interior, -0.37, 0.72, -0.5);
   bar(v(-0.4, 0.73, -0.47), v(-0.55, 0.72, -0.47), 0.006, dark);
   bar(v(-0.34, 0.73, -0.47), v(-0.19, 0.72, -0.47), 0.006, dark);
 
@@ -245,6 +251,7 @@ export function buildCockpit(spec: InteriorSpec): Cockpit {
   const brakePedal = add(pedalGeo, pedalMat, -0.38, 0.35, -0.55);
   const throttlePedal = add(new THREE.BoxGeometry(0.05, 0.14, 0.02), pedalMat, -0.24, 0.33, -0.55);
 
+  smoothShade(root, 40);
   root.traverse((o) => {
     o.castShadow = true;
     o.receiveShadow = true;

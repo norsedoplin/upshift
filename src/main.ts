@@ -10,7 +10,7 @@ import { EngineAudio } from './audio';
 import { buildCockpit, shifterPose } from './cockpit';
 import { drawCluster, drawSpeedo, gearLabel } from './gauges';
 import { generateTouge, roadPoint } from './track/touge';
-import { buildScenery, SUN_DIR } from './track/scenery';
+import { buildScenery, SUN_DIR, updateTreeDetail } from './track/scenery';
 import { DayCycle } from './track/daylight';
 import { Graphics, bakeEnvironment } from './graphics';
 import { collideWithEdges } from './track/collide';
@@ -485,6 +485,7 @@ function frame(now: number) {
   // Shadows cover the area just ahead of the car, where you're looking.
   shadowFocus.set(chassis.x - Math.sin(chassis.yaw) * 14, loc.h, chassis.z - Math.cos(chassis.yaw) * 14);
   graphics.follow(shadowFocus);
+  updateTreeDetail(scenery.trees, shadowFocus);
   graphics.render(camera);
 }
 
