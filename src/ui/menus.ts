@@ -375,6 +375,7 @@ export class Menus {
         },
       });
       list.append(link);
+      option('Clutch trigger feel', row++, ['On', 'Off'], st.clutchFeel ? 0 : 1, (i) => (st.clutchFeel = i === 0));
     }
     option('Volume', row++, pctLabels, nearest(st.volume), (i) => (st.volume = pct[i]));
     option('Speed units', row++, ['km/h', 'mph'], st.units === 'kmh' ? 0 : 1, (i) => (st.units = i === 0 ? 'kmh' : 'mph'));

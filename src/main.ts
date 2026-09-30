@@ -158,6 +158,9 @@ let graphicsReady = false;
 function applySettings() {
   const st = progress.settings;
   input.bindings = st.bindings;
+  const clutchPad = st.bindings.pad.clutch;
+  haptics.clutchTrigger = clutchPad?.kind === 'button' ? (clutchPad.index === 6 ? 'left' : clutchPad.index === 7 ? 'right' : null) : null;
+  haptics.clutchFeel = st.clutchFeel;
   updateHint();
   haptics.strength = st.rumble;
   audio.setVolume(st.volume);
