@@ -20,6 +20,8 @@ export class EngineAudio {
   private grindGain!: GainNode;
   private clutchGain!: GainNode;
   private clutchFilter!: BiquadFilterNode;
+  private squealFilter!: BiquadFilterNode;
+  private squealGain!: GainNode;
   volume = 0.8;
 
   start() {
@@ -87,6 +89,15 @@ export class EngineAudio {
     this.clutchGain.gain.value = 0;
     noise.connect(this.clutchFilter).connect(this.clutchGain).connect(this.master);
 
+    // Tyre squeal: narrow band of noise that rises as the tyres pass their limit.
+    this.squealFilter = ctx.createBiquadFilter();
+    this.squealFilter.type = 'bandpass';
+    this.squealFilter.frequency.value = 900;
+    this.squealFilter.Q.value = 9;
+    this.squealGain = ctx.createGain();
+    this.squealGain.gain.value = 0;
+    noise.connect(this.squealFilter).connect(this.squealGain).connect(this.master);
+
     this.starterOsc = ctx.createOscillator();
     this.starterOsc.type = 'sawtooth';
     this.starterOsc.frequency.value = 180;
@@ -115,7 +126,7 @@ export class EngineAudio {
     g.setTargetAtTime(0, t + 0.21, 0.03);
   }
 
-  update(car: Car) {
+  update(car: Car, tyreSlip = 0) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     const tc = 0.02;
@@ -139,6 +150,10 @@ export class EngineAudio {
     const v = Math.abs(car.speed);
     this.windFilter.frequency.setTargetAtTime(200 + v * 25, t, 0.1);
     this.windGain.gain.setTargetAtTime(Math.min(0.35, (v / 40) ** 2 * 0.3 + (v > 0.3 ? 0.015 : 0)), t, 0.1);
+
+    const squeal = Math.max(0, Math.min(1, (tyreSlip - 0.1) / 0.2));
+    this.squealGain.gain.setTargetAtTime(squeal * 0.22, t, 0.05);
+    this.squealFilter.frequency.setTargetAtTime(750 + squeal * 350 + Math.sin(t * 17) * 40, t, 0.05);
 
     const slipPower = Math.abs(car.clutchTorque * (car.engineOmega - car.outputOmega));
     this.clutchFilter.frequency.setTargetAtTime(900 + Math.abs(car.slipRpm) * 0.4, t, tc);

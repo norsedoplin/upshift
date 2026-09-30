@@ -160,6 +160,10 @@ body {
   color: var(--muted);
   font-size: 14px;
 }
+#start-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
 .card button {
   margin-top: 10px;
   width: 100%;
@@ -171,4 +175,134 @@ body {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+}
+
+#topbar {
+  position: fixed;
+  top: 14px;
+  left: 16px;
+  right: 16px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+#creds {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+#scorebox {
+  text-align: center;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+}
+#score {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+#combo {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  min-height: 16px;
+}
+#timer {
+  justify-self: end;
+  font-size: 14px;
+  font-weight: 600;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+#progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.15);
+}
+#progress-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+}
+#toasts {
+  position: fixed;
+  top: 27%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  gap: 10px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  transition: opacity 0.5s;
+}
+.toast.good b {
+  color: #8fd694;
+}
+.toast.bad b {
+  color: #ff7a6b;
+}
+.toast.fade {
+  opacity: 0;
+}
+#summary {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(22, 23, 27, 0.5);
+  backdrop-filter: blur(4px);
+  padding: 16px;
+  cursor: pointer;
+}
+#summary h1 {
+  font-size: 48px;
+}
+#summary .muted {
+  margin: 0 0 14px;
+}
+.earned {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(255, 122, 61, 0.14);
+  margin-bottom: 12px;
+}
+.earned b {
+  font-size: 22px;
+  color: var(--accent);
+}
+#summary dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 20px;
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+#summary dt {
+  color: var(--muted);
+}
+#summary dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }

@@ -31,7 +31,7 @@ export const HATCHBACK: CarSpec = {
   finalDrive: 4.1,
   dragArea: 0.7,
   rollingResistance: 0.012,
-  brakeForce: 11000,
+  brakeForce: 9500,
   handbrakeForce: 5000,
   engineInertia: 0.16,
   inputShaftInertia: 0.02,
@@ -58,6 +58,7 @@ export interface CarInputs {
   clutch: number; // 0..1, 1 = pedal fully pressed (disengaged)
   handbrake: boolean;
   slope: number; // sin of road grade along the car's heading, positive = uphill
+  extraForce?: number; // N along the heading from the chassis (cornering drag, etc.)
 }
 
 export type CarEvent =
@@ -65,7 +66,8 @@ export type CarEvent =
   | { type: 'start' }
   | { type: 'grind' }
   | { type: 'shift'; gear: number }
-  | { type: 'lock'; slip: number }; // clutch locked up; slip in rad/s just before
+  | { type: 'lock'; slip: number } // clutch locked up; slip in rad/s just before
+  | { type: 'wall'; impact: number }; // hit the road edge; impact speed in m/s
 
 export class Car {
   spec: CarSpec;
@@ -83,6 +85,8 @@ export class Car {
   load = 0; // 0..1 how hard the engine is working
   throttleEff = 0;
   accel = 0; // m/s^2, filtered
+  driveForce = 0; // N pushed through the driven wheels (negative = engine braking)
+  brakeForceNow = 0; // N of service brake currently applied
   cranking = false;
 
   private crankTime = 0;
@@ -106,7 +110,7 @@ export class Car {
   }
 
   /** Overall ratio between the clutch output shaft and the wheels (signed). */
-  private ratio(gear = this.gear) {
+  ratio(gear = this.gear) {
     return gear === 0 ? 0 : this.spec.gears[gear] * this.spec.finalDrive;
   }
 
@@ -151,6 +155,30 @@ export class Car {
     if (r !== 0) this.outputOmega = (this.speed / this.spec.wheelRadius) * r;
     this.events.push({ type: 'shift', gear });
     return true;
+  }
+
+  /** Force a new road speed (e.g. after hitting a wall), keeping the drivetrain consistent. */
+  setSpeed(v: number) {
+    this.speed = v;
+    const r = this.ratio();
+    if (r === 0) return;
+    this.outputOmega = (v / this.spec.wheelRadius) * r;
+    if (this.locked) this.engineOmega = Math.max(0, this.outputOmega);
+  }
+
+  pushEvent(e: CarEvent) {
+    this.events.push(e);
+  }
+
+  reset() {
+    this.gear = 0;
+    this.engineOmega = 0;
+    this.outputOmega = 0;
+    this.speed = 0;
+    this.accel = 0;
+    this.running = false;
+    this.locked = false;
+    this.starterRequest = 0;
   }
 
   drainEvents() {
@@ -222,7 +250,8 @@ export class Car {
 
     // --- External forces on the car ------------------------------------
     const v = this.speed;
-    const drive = -s.mass * G * inp.slope - 0.5 * AIR_DENSITY * s.dragArea * v * Math.abs(v);
+    const drive = -s.mass * G * inp.slope - 0.5 * AIR_DENSITY * s.dragArea * v * Math.abs(v) + (inp.extraForce ?? 0);
+    this.brakeForceNow = inp.brake * s.brakeForce;
     const frictionForce =
       inp.brake * s.brakeForce +
       (inp.handbrake ? s.handbrakeForce : 0) +
@@ -288,6 +317,7 @@ export class Car {
       nv = applyFriction(nv, frictionForce / s.mass, dt);
       this.speed = nv;
     }
+    this.driveForce = r === 0 ? 0 : (this.clutchTorque * r) / s.wheelRadius;
     const a = (this.speed - prev) / dt;
     this.accel += (a - this.accel) * Math.min(1, dt / 0.08);
 
