@@ -9,7 +9,9 @@ describe('dualsense reports', () => {
   it('builds a USB rumble report', () => {
     const r = rumbleReport(false, 1, 0.5);
     expect(r.length).toBe(62); // 63 with the report id
-    expect(r[0]).toBe(0x03);
+    expect(r[0]).toBe(0x02);
+    expect(r[38]).toBe(0x04);
+    expect(rumbleReport(false, 1, 1, 0, false)[0]).toBe(0x03);
     expect(r[2]).toBe(128); // weak (right) motor
     expect(r[3]).toBe(255); // strong (left) motor
   });
@@ -19,7 +21,7 @@ describe('dualsense reports', () => {
     expect(r.length).toBe(77); // 78 with the report id
     expect(r[0]).toBe(0x30);
     expect(r[1]).toBe(0x10);
-    expect(r[2]).toBe(0x03);
+    expect(r[2]).toBe(0x02);
     expect(r[5]).toBe(64);
     const head = new Uint8Array([0xa2, 0x31, ...r.subarray(0, 73)]);
     const crc = (crc32(head) ^ 0xffffffff) >>> 0;
