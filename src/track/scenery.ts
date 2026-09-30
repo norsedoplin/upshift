@@ -4,7 +4,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { COLORS } from '../cockpit';
-import type { Road, RoadSample } from './touge';
+import { LOT_RAMP, type Road, type RoadSample } from './touge';
+import type { DayTargets } from './daylight';
+import { CARS } from '../cars';
+import { buildCarModel } from '../ui/carModel';
 
 function hash(x: number, y: number) {
   const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
@@ -57,6 +60,7 @@ export class Terrain {
 
   nearest(x: number, z: number) {
     let best = Infinity;
+    let bestI = -1;
     let h = 0;
     let sw = 0;
     let sh = 0;
@@ -65,18 +69,27 @@ export class Terrain {
       const d2 = (p.x - x) ** 2 + (p.z - z) ** 2;
       if (d2 < best) {
         best = d2;
+        bestI = i;
         h = p.h;
       }
       const w = 1 / (d2 + 16) ** 1.5;
       sw += w;
       sh += w * p.h;
     }
-    return { dist: Math.sqrt(best), h, blend: sw > 0 ? sh / sw : h };
+    return { dist: Math.sqrt(best), h, blend: sw > 0 ? sh / sw : h, index: bestI };
+  }
+
+  /** Which side of the road a point is on (1 = left), and how far a lot widens the flat there. */
+  lotAt(x: number, z: number, index: number) {
+    if (index < 0) return 0;
+    const p = this.road.samples[index];
+    const side = (x - p.x) * -Math.cos(p.yaw) + (z - p.z) * Math.sin(p.yaw) > 0 ? 1 : -1;
+    return this.road.lotDepth(p.s, side);
   }
 
   height(x: number, z: number) {
     const n = this.nearest(x, z);
-    const off = n.dist - (this.road.halfWidth + 1.6);
+    const off = n.dist - (this.road.halfWidth + 1.6) - this.lotAt(x, z, n.index);
     if (off <= 0) return n.h - 0.25;
     const far = this.farHeight(x, z);
     const t = smooth(off / 20);
@@ -94,6 +107,9 @@ export class Terrain {
 export interface Scenery {
   terrain: Terrain;
   sun: THREE.DirectionalLight;
+  /** Sky and ground only, baked into reflections. */
+  envScene: THREE.Scene;
+  day: DayTargets;
 }
 
 /** Direction from the ground towards the sun: a warm mid-afternoon sun, low enough for long shadows. */
@@ -106,40 +122,61 @@ export function buildScenery(scene: THREE.Scene, road: Road): Scenery {
 
   // The sky is also baked into an environment map (see bakeEnvironment), so the
   // hemisphere light only has to fill in a little.
-  scene.add(new THREE.HemisphereLight(COLORS.skyTop, new THREE.Color('#9c8a66'), 1.0));
+  const hemi = new THREE.HemisphereLight(COLORS.skyTop, new THREE.Color('#9c8a66'), 1.0);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(SUN_COLOR, 3.1);
   sun.position.copy(SUN_DIR).multiplyScalar(200);
   scene.add(sun);
 
   const terrain = new Terrain(road);
   const bounds = roadBounds(road, 320);
-  scene.add(buildSky());
+  const sky = buildSky();
+  const env = buildEnvironmentScene();
+  const mountains = buildMountains(bounds);
+  const clouds = buildClouds(bounds);
+  const lots = buildLots(road);
+  scene.add(sky);
   scene.add(buildTerrainMesh(terrain, bounds));
   scene.add(buildFarGround(road, bounds));
   scene.add(buildRoadMesh(road));
+  scene.add(lots.group);
   scene.add(buildRails(road, terrain));
   scene.add(buildDelineators(road, terrain));
+  scene.add(buildChevrons(road));
   scene.add(buildTrees(road, terrain, bounds));
   scene.add(buildRocks(road, terrain, bounds));
   scene.add(buildGantry(road, road.startS, 'START'));
   scene.add(buildGantry(road, road.finishS, 'FINISH'));
-  scene.add(buildMountains(bounds));
-  scene.add(buildClouds(bounds));
-  return { terrain, sun };
+  scene.add(mountains.group);
+  scene.add(clouds);
+  return {
+    terrain,
+    sun,
+    envScene: env.scene,
+    day: {
+      scene,
+      sun,
+      hemi,
+      skies: [sky.material as THREE.ShaderMaterial, env.sky],
+      haze: mountains.haze,
+      clouds: clouds.material as THREE.MeshStandardMaterial,
+      lamps: [lots.lamp, REFLECTOR, CHEVRON],
+      pools: [lots.pool],
+      envGround: env.ground,
+    },
+  };
 }
 
 /** A small scene of just sky and ground, baked into reflections and ambient light. */
-export function buildEnvironmentScene() {
-  const env = new THREE.Scene();
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), skyMaterial());
-  env.add(sky);
-  const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(100, 24).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ color: '#5e5d4c' }),
-  );
-  ground.position.y = -2;
-  env.add(ground);
-  return env;
+function buildEnvironmentScene() {
+  const scene = new THREE.Scene();
+  const sky = skyMaterial();
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), sky));
+  const ground = new THREE.MeshBasicMaterial({ color: '#5e5d4c' });
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(100, 24).rotateX(-Math.PI / 2), ground);
+  disc.position.y = -2;
+  scene.add(disc);
+  return { scene, sky, ground };
 }
 
 interface Bounds {
@@ -168,6 +205,7 @@ function skyMaterial() {
       horizon: { value: COLORS.skyHorizon.clone() },
       sunDir: { value: SUN_DIR.clone() },
       sunColor: { value: SUN_COLOR.clone() },
+      stars: { value: 0 },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -180,7 +218,9 @@ function skyMaterial() {
       uniform vec3 horizon;
       uniform vec3 sunDir;
       uniform vec3 sunColor;
+      uniform float stars;
       varying vec3 vDir;
+      float starHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
       void main() {
         vec3 d = normalize(vDir);
         float y = max(d.y, 0.0);
@@ -188,6 +228,14 @@ function skyMaterial() {
         float s = max(dot(d, sunDir), 0.0);
         col += sunColor * (pow(s, 6.0) * 0.18 + pow(s, 48.0) * 0.45);
         col += sunColor * smoothstep(0.9993, 0.9997, s) * 6.0;
+        if (stars > 0.01) {
+          vec3 g = d * 260.0;
+          vec3 cell = floor(g);
+          float h = starHash(cell);
+          float spot = smoothstep(0.32, 0.08, length(fract(g) - 0.5));
+          float twinkle = 0.5 + 0.5 * starHash(cell + 3.0);
+          col += vec3(0.9, 0.93, 1.0) * step(0.997, h) * spot * twinkle * stars * smoothstep(0.02, 0.2, d.y) * 1.6;
+        }
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -304,9 +352,11 @@ function meshFrom(positions: number[], color: THREE.ColorRepresentation, roughne
  */
 function asphalt(road: Road) {
   const w = road.halfWidth;
-  const offsets = [-w, -3.0, -2.55, -2.1, -1.35, -0.9, -0.45, 0, 0.45, 0.9, 1.35, 2.1, 2.55, 3.0, w];
+  // Laid out for a 3.6 m half-width and scaled to the actual road.
+  const k = w / 3.6;
+  const offsets = [-3.6, -3.0, -2.55, -2.1, -1.35, -0.9, -0.45, 0, 0.45, 0.9, 1.35, 2.1, 2.55, 3.0, 3.6].map((o) => o * k);
   const wheelTrack = (o: number) => {
-    const a = Math.abs(o);
+    const a = Math.abs(o) / k;
     // Each lane's two wheel paths sit about 0.75 m either side of its centre (1.8 m).
     return Math.max(0, 1 - Math.abs(a - 1.05) / 0.4) + Math.max(0, 1 - Math.abs(a - 2.55) / 0.4);
   };
@@ -365,17 +415,22 @@ function buildRails(road: Road, terrain: Terrain) {
   const q = new THREE.Quaternion();
   const up = new THREE.Vector3(0, 1, 0);
   const off = road.wallOffset + 0.15;
+  const refl: THREE.Matrix4[] = [];
   const s = road.samples;
   for (let i = 0; i + 2 < s.length; i += 2) {
     const a = s[i];
     const b = s[i + 2];
     for (const side of [-1, 1]) {
-      // Rails where the ground falls away and on the outside of tighter corners.
-      if (!hasRail(road, terrain, a, side)) continue;
-      const pa = at(a, side * off, 0);
-      const pb = at(b, side * off, 0);
+      // Rails where the ground falls away, on the outside of corners, and round every lot.
+      const lotA = road.lotDepth(a.s, side);
+      const lotB = road.lotDepth(b.s, side);
+      if (!lotA && !lotB && !hasRail(road, terrain, a, side)) continue;
+      const pa = at(a, side * (off + lotA), 0);
+      const pb = at(b, side * (off + lotB), 0);
       q.setFromAxisAngle(up, a.yaw);
       posts.push(new THREE.Matrix4().compose(new THREE.Vector3(pa[0], pa[1] + 0.37, pa[2]), q, new THREE.Vector3(1, 1, 1)));
+      // A reflector on every other post catches the headlights.
+      if (i % 4 === 0) refl.push(new THREE.Matrix4().compose(new THREE.Vector3(pa[0] - Math.cos(a.yaw) * side * -0.06, pa[1] + 0.6, pa[2] + Math.sin(a.yaw) * side * -0.06), q, new THREE.Vector3(1, 1, 1)));
       const dx = pb[0] - pa[0];
       const dy = pb[1] - pa[1];
       const dz = pb[2] - pa[2];
@@ -401,16 +456,176 @@ function buildRails(road: Road, terrain: Terrain) {
     m.castShadow = true;
     m.receiveShadow = true;
   }
-  g.add(ip, ib);
+  const ir = new THREE.InstancedMesh(new THREE.BoxGeometry(0.02, 0.1, 0.16), REFLECTOR, Math.max(1, refl.length));
+  refl.forEach((m, i) => ir.setMatrixAt(i, m));
+  ir.count = refl.length;
+  g.add(ip, ib, ir);
   return g;
 }
+
+/** Amber reflectors: they glow a little by day and brightly at night. */
+const REFLECTOR = new THREE.MeshStandardMaterial({ color: '#ff9a2e', emissive: '#ff7a10', emissiveIntensity: 0.9, roughness: 0.3 });
 
 /** Rails where the ground falls away and on the outside of tighter corners. */
 function hasRail(road: Road, terrain: Terrain, a: RoadSample, side: number) {
   const [tx, , tz] = at(a, side * (road.halfWidth + 12), 0);
-  const drop = terrain.height(tx, tz) < a.h - 1.5;
-  const outside = side === -Math.sign(a.kappa) && Math.abs(a.kappa) > 1 / 70;
+  const drop = terrain.height(tx, tz) < a.h - 0.8;
+  const outside = side === -Math.sign(a.kappa) && Math.abs(a.kappa) > 1 / 110;
   return drop || outside;
+}
+
+/**
+ * The lots: a paved apron off the road with parking bays, lamps along the back and, in some,
+ * a parked car or a pair of vending machines.
+ */
+function buildLots(road: Road) {
+  const g = new THREE.Group();
+  const surface: number[] = [];
+  const lines: number[] = [];
+  const quad = (out: number[], a: number[], b: number[], c: number[], d: number[]) => out.push(...a, ...b, ...c, ...c, ...b, ...d);
+  for (const lot of road.lots) {
+    const side = lot.side;
+    const outer = (p: RoadSample) => road.wallOffset + road.lotDepth(p.s, side) + 0.3;
+    for (let i = 0; i < road.samples.length - 1; i++) {
+      const a = road.samples[i];
+      const b = road.samples[i + 1];
+      if (b.s < lot.s0 || a.s > lot.s1) continue;
+      const inner = road.halfWidth + 0.3;
+      quad(surface, at(a, side * inner, 0.01), at(b, side * inner, 0.01), at(a, side * outer(a), 0.01), at(b, side * outer(b), 0.01));
+    }
+    // Bays: short lines out from the back edge every 3 m, and one along their fronts.
+    const full = road.wallOffset + lot.depth;
+    const s0 = lot.s0 + LOT_RAMP + 1;
+    const s1 = lot.s1 - LOT_RAMP - 1;
+    for (let s = s0; s <= s1 - 4 + 0.01; s += 3) {
+      const p = road.sampleAt(s);
+      const q = road.sampleAt(s + 0.12);
+      quad(lines, at(p, side * (full - 5.2), 0.02), at(q, side * (full - 5.2), 0.02), at(p, side * (full - 0.2), 0.02), at(q, side * (full - 0.2), 0.02));
+    }
+    for (let s = s0; s < s1 - 4; s += 1) {
+      const p = road.sampleAt(s);
+      const q = road.sampleAt(Math.min(s + 1, s1 - 4));
+      quad(lines, at(p, side * (full - 5.3), 0.02), at(q, side * (full - 5.3), 0.02), at(p, side * (full - 5.18), 0.02), at(q, side * (full - 5.18), 0.02));
+    }
+  }
+  const pave = meshFrom(surface, new THREE.Color(COLORS.road).multiplyScalar(1.12), 0.85);
+  pave.renderOrder = 1;
+  g.add(pave, meshFrom(lines, COLORS.line, 0.55));
+
+  const lamp = new THREE.MeshStandardMaterial({ color: '#fff4d6', emissive: '#ffd89a', emissiveIntensity: 0.15, roughness: 0.4 });
+  // A soft round glow texture, so each pool fades out at its edge.
+  const glow = document.createElement('canvas');
+  glow.width = glow.height = 64;
+  const gctx = glow.getContext('2d')!;
+  const grad = gctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  // Drawn white-to-black: with additive blending black adds nothing, so the edge fades away.
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.4, '#6a6a6a');
+  grad.addColorStop(1, '#000000');
+  gctx.fillStyle = grad;
+  gctx.fillRect(0, 0, 64, 64);
+  const glowTex = new THREE.CanvasTexture(glow);
+  glowTex.colorSpace = THREE.SRGBColorSpace;
+  const pool = new THREE.MeshBasicMaterial({ color: '#ffc27a', map: glowTex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+  const steel = new THREE.MeshStandardMaterial({ color: '#8d9297', metalness: 0.6, roughness: 0.45 });
+  const machineBody = [new THREE.MeshStandardMaterial({ color: '#c8302c', roughness: 0.5 }), new THREE.MeshStandardMaterial({ color: '#2d6fc2', roughness: 0.5 })];
+  const poolGeo = new THREE.PlaneGeometry(11, 11).rotateX(-Math.PI / 2);
+  const paints = ['#e8e4dc', '#1d1f24', '#b8342c', '#8a9aa6', '#2f5d8a', '#d9b43a'];
+  for (const prop of road.props) {
+    const o = new THREE.Group();
+    o.position.set(prop.x, prop.h, prop.z);
+    o.rotation.y = prop.yaw;
+    if (prop.kind === 'lamp') {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 5.4, 6), steel);
+      post.position.y = 2.7;
+      // The arm reaches back over the lot (towards the road side).
+      // Local +x is the road's right; the lamp leans out towards the road.
+      const reach = prop.variant;
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 0.08), steel);
+      arm.position.set(reach * 0.75, 5.35, 0);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, 0.3), lamp);
+      head.position.set(reach * 1.45, 5.28, 0);
+      const light = new THREE.Mesh(poolGeo, pool);
+      light.position.set(reach * 3, 0.04, 0);
+      light.renderOrder = 2;
+      o.add(post, arm, head, light);
+    } else if (prop.kind === 'vending') {
+      // Front faces local -z (the prop's heading).
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.85, 0.75), machineBody[prop.variant % 2]);
+      body.position.y = 0.925;
+      const front = new THREE.Mesh(new THREE.BoxGeometry(0.78, 1.1, 0.02), lamp);
+      front.position.set(0, 1.2, -0.38);
+      const slot = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.03), new THREE.MeshStandardMaterial({ color: '#15161a' }));
+      slot.position.set(0, 0.35, -0.38);
+      o.add(body, front, slot);
+    } else {
+      const model = CARS[prop.variant % CARS.length];
+      const car = buildCarModel(model.body, new THREE.Color(paints[prop.variant % paints.length]));
+      o.add(car.group);
+    }
+    o.traverse((m) => {
+      if (m instanceof THREE.Mesh && m.material !== pool) {
+        m.castShadow = true;
+        m.receiveShadow = true;
+      }
+    });
+    g.add(o);
+  }
+  return { group: g, lamp, pool };
+}
+
+/** Yellow-and-black chevron boards on the outside of the tight corners. */
+const CHEVRON = new THREE.MeshStandardMaterial({ roughness: 0.6, emissive: '#ffffff', emissiveIntensity: 0.15, side: THREE.DoubleSide });
+function buildChevrons(road: Road) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#f2c230';
+  ctx.fillRect(0, 0, 64, 64);
+  ctx.fillStyle = '#16171b';
+  // An arrow pointing right: the corner turns that way (mirrored for left-handers).
+  ctx.beginPath();
+  ctx.moveTo(16, 6);
+  ctx.lineTo(40, 32);
+  ctx.lineTo(16, 58);
+  ctx.lineTo(28, 58);
+  ctx.lineTo(52, 32);
+  ctx.lineTo(28, 6);
+  ctx.closePath();
+  ctx.fill();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  CHEVRON.map = tex;
+  CHEVRON.emissiveMap = tex;
+  const board = new THREE.BoxGeometry(0.7, 0.7, 0.04);
+  const postGeo = new THREE.BoxGeometry(0.07, 1.25, 0.07);
+  const post = new THREE.MeshStandardMaterial({ color: '#6a6d72', roughness: 0.6 });
+  const boards: THREE.Matrix4[] = [];
+  const posts: THREE.Matrix4[] = [];
+  const q = new THREE.Quaternion();
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < road.samples.length; i += 5) {
+    const a = road.samples[i];
+    if (Math.abs(a.kappa) < 1 / 45) continue;
+    const turn = Math.sign(a.kappa); // 1 = left-hander
+    const side = -turn; // the outside
+    if (road.lotDepth(a.s, side) > 0) continue;
+    const [x, y, z] = at(a, side * (road.wallOffset + 0.55), 0);
+    q.setFromAxisAngle(up, a.yaw);
+    // Face back down the road; mirror the arrow for left-handers.
+    boards.push(new THREE.Matrix4().compose(new THREE.Vector3(x, y + 1.25, z), q, new THREE.Vector3(-turn, 1, 1)));
+    posts.push(new THREE.Matrix4().compose(new THREE.Vector3(x, y + 0.62, z + 0), q, new THREE.Vector3(1, 1, 1)));
+  }
+  const g = new THREE.Group();
+  const ib = new THREE.InstancedMesh(board, CHEVRON, Math.max(1, boards.length));
+  boards.forEach((m, i) => ib.setMatrixAt(i, m));
+  ib.count = boards.length;
+  const ip = new THREE.InstancedMesh(postGeo, post, Math.max(1, posts.length));
+  posts.forEach((m, i) => ip.setMatrixAt(i, m));
+  ip.count = posts.length;
+  ib.castShadow = ip.castShadow = true;
+  g.add(ib, ip);
+  return g;
 }
 
 /** White marker posts with amber reflectors along the verge wherever there's no rail. */
@@ -420,14 +635,15 @@ function buildDelineators(road: Road, terrain: Terrain) {
   const reflGeo = new THREE.BoxGeometry(0.06, 0.12, 0.112);
   const post = new THREE.MeshStandardMaterial({ color: '#f1efe9', roughness: 0.6 });
   const cap = new THREE.MeshStandardMaterial({ color: '#1c1d20', roughness: 0.6 });
-  const refl = new THREE.MeshStandardMaterial({ color: '#ff9a2e', emissive: '#ff7a10', emissiveIntensity: 0.9, roughness: 0.3 });
+  const refl = REFLECTOR;
   const mats: THREE.Matrix4[] = [];
   const q = new THREE.Quaternion();
   const up = new THREE.Vector3(0, 1, 0);
-  for (let i = 0; i < road.samples.length; i += 12) {
+  // Close together, so they flick past and you feel the speed.
+  for (let i = 0; i < road.samples.length; i += 6) {
     const a = road.samples[i];
     for (const side of [-1, 1]) {
-      if (hasRail(road, terrain, a, side)) continue;
+      if (road.lotDepth(a.s, side) > 0 || hasRail(road, terrain, a, side)) continue;
       const p = at(a, side * (road.wallOffset + 0.05), 0);
       q.setFromAxisAngle(up, a.yaw);
       mats.push(new THREE.Matrix4().compose(new THREE.Vector3(p[0], p[1], p[2]), q, new THREE.Vector3(1, 1, 1)));
@@ -481,7 +697,7 @@ function buildTrees(road: Road, terrain: Terrain, b: Bounds) {
   const trunkMat = new THREE.MeshStandardMaterial({ color: '#7a5a3f', flatShading: true, roughness: 1 });
   const pineMat = new THREE.MeshStandardMaterial({ color: '#ffffff', flatShading: true, roughness: 0.9 });
   const leafMat = new THREE.MeshStandardMaterial({ color: '#ffffff', flatShading: true, roughness: 0.9 });
-  const N = 5000;
+  const N = 11000;
   const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, N);
   const pines = new THREE.InstancedMesh(crownGeo, pineMat, N);
   const rounds = new THREE.InstancedMesh(roundGeo, leafMat, N);
@@ -494,13 +710,29 @@ function buildTrees(road: Road, terrain: Terrain, b: Bounds) {
   let t = 0;
   let p = 0;
   let r = 0;
-  for (let i = 0; i < N * 3 && t < N; i++) {
+  const clear = (x: number, z: number, margin: number) => {
+    const near = terrain.nearest(x, z);
+    return near.dist >= road.wallOffset + margin + terrain.lotAt(x, z, near.index);
+  };
+  const spots: [number, number][] = [];
+  // Rows of trees right behind the verge, so the roadside rushes past.
+  for (let i = 0; i < road.samples.length; i += 3) {
+    const a = road.samples[i];
+    for (const side of [-1, 1]) {
+      if (hash(i, side + 90) < 0.3 || valueNoise(a.s / 60, side * 7) < 0.3) continue;
+      const [x, , z] = at(a, side * (road.wallOffset + 2.2 + hash(i, side + 91) * 6), 0);
+      if (clear(x, z, 2)) spots.push([x, z]);
+    }
+  }
+  for (let i = 0; i < N * 3 && spots.length < N; i++) {
     const x = b.minX + hash(i, 2) * (b.maxX - b.minX);
     const z = b.minZ + hash(i, 3) * (b.maxZ - b.minZ);
-    // Forests come in clumps.
-    if (valueNoise(x / 90, z / 90) < 0.45) continue;
-    const near = terrain.nearest(x, z);
-    if (near.dist < road.wallOffset + 4) continue;
+    // Forests come in clumps, thicker near the road.
+    if (valueNoise(x / 90, z / 90) < 0.36) continue;
+    if (clear(x, z, 2.5)) spots.push([x, z]);
+  }
+  for (let i = 0; i < spots.length && t < N; i++) {
+    const [x, z] = spots[i];
     const y = terrain.height(x, z);
     const sc = 0.7 + hash(i, 4) * 0.8;
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), hash(i, 5) * 6.28);
@@ -543,7 +775,7 @@ function buildRocks(road: Road, terrain: Terrain, b: Bounds) {
     const x = b.minX + hash(i, 21) * (b.maxX - b.minX);
     const z = b.minZ + hash(i, 22) * (b.maxZ - b.minZ);
     const near = terrain.nearest(x, z);
-    if (near.dist < road.wallOffset + 1.5 || near.dist > 140) continue;
+    if (near.dist < road.wallOffset + 1.5 + terrain.lotAt(x, z, near.index) || near.dist > 140) continue;
     const y = terrain.height(x, z);
     const sc = 0.25 + hash(i, 23) ** 2 * 1.6;
     e.set(hash(i, 24) * 3, hash(i, 25) * 6, hash(i, 26) * 3);
@@ -608,8 +840,12 @@ function buildMountains(b: Bounds) {
   // hazier and bluer with distance.
   // Fog would hide them completely, so the haze is faked with a glow in the horizon colour.
   const haze = COLORS.skyHorizon;
-  const hazy = (color: string, amount: number) =>
-    new THREE.MeshStandardMaterial({ color, flatShading: true, fog: false, roughness: 1, emissive: haze, emissiveIntensity: amount, envMapIntensity: 0.4 });
+  const hazeMats: { mat: THREE.MeshStandardMaterial; amount: number }[] = [];
+  const hazy = (color: string, amount: number) => {
+    const mat = new THREE.MeshStandardMaterial({ color, flatShading: true, fog: false, roughness: 1, emissive: haze, emissiveIntensity: amount, envMapIntensity: 0.4 });
+    hazeMats.push({ mat, amount });
+    return mat;
+  };
   const ridge = hazy('#6f8f78', 0.12);
   const rock = hazy('#ffffff', 0.15);
   rock.vertexColors = true;
@@ -646,7 +882,7 @@ function buildMountains(b: Bounds) {
     mtn.rotation.y = hash(i, 12) * 3;
     group.add(mtn);
   }
-  return group;
+  return { group, haze: hazeMats };
 }
 
 /** Nudge a cone's inner vertices about so peaks look weathered rather than machined. */

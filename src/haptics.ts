@@ -93,7 +93,7 @@ export class Haptics {
         const firm = 1 - car.spec.biteEnd;
         const start = grab - (grab - firm) * 0.35;
         // Kept light: enough to find the bite, not a wall.
-        clutch = triggerSection(start, grab + 0.03, 0.2 * Math.min(1, 0.4 + 0.6 * k));
+        clutch = triggerSection(start, grab + 0.03, 0.12 * Math.min(1, 0.4 + 0.6 * k));
       }
       this.dualsense.setTriggers(this.clutchTrigger === 'left' ? clutch : TRIGGER_OFF, this.clutchTrigger === 'right' ? clutch : TRIGGER_OFF);
       this.dualsense.rumble(this.strong * k, this.weak * k);

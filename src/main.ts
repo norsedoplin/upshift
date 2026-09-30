@@ -9,8 +9,9 @@ import { Haptics } from './haptics';
 import { EngineAudio } from './audio';
 import { buildCockpit, shifterPose } from './cockpit';
 import { drawCluster, drawSpeedo, gearLabel } from './gauges';
-import { generateTouge, SAMPLE_STEP } from './track/touge';
-import { buildScenery, buildEnvironmentScene, SUN_DIR } from './track/scenery';
+import { generateTouge, roadPoint } from './track/touge';
+import { buildScenery, SUN_DIR } from './track/scenery';
+import { DayCycle } from './track/daylight';
 import { Graphics, bakeEnvironment } from './graphics';
 import { collideWithEdges } from './track/collide';
 import { Scorer, credsForRun, ScoreEvent } from './game/scoring';
@@ -30,8 +31,19 @@ const scene = new THREE.Scene();
 const road = generateTouge();
 const scenery = buildScenery(scene, road);
 const graphics = new Graphics(renderer, scene, scenery.sun, SUN_DIR);
-scene.environment = bakeEnvironment(renderer, buildEnvironmentScene());
-scene.environmentIntensity = 0.8;
+const day = new DayCycle(scenery.day);
+let envTarget = bakeEnvironment(renderer, scenery.envScene);
+scene.environment = envTarget.texture;
+/** Move the sun, recolour the sky and, now and then, re-bake reflections to match. */
+function updateDay(dt: number) {
+  if (day.update(dt, progress.settings.timeOfDay)) {
+    envTarget = bakeEnvironment(renderer, scenery.envScene, envTarget);
+    scene.environment = envTarget.texture;
+  }
+  graphics.setSunDir(day.dir);
+  renderer.toneMappingExposure = 1.05 + day.sky.dark * 0.35;
+  headlights.intensity = day.sky.dark * 900;
+}
 const showroom = new Showroom();
 
 const progress = loadProgress();
@@ -41,6 +53,15 @@ scene.add(cockpit.root);
 // The body you see from outside (chase view). Its origin is on the ground.
 let exterior = buildCarModel(model.body, new THREE.Color(paintFor(progress, model.id).color));
 scene.add(exterior.group);
+// Headlights: one wide beam from the nose, only switched on after dark.
+const headlights = new THREE.SpotLight('#fff1d8', 0, 0, 0.62, 0.55, 1.6);
+const headlightAim = new THREE.Object3D();
+headlights.position.set(0, 0.75, -2.1);
+headlightAim.position.set(0, -0.6, -22);
+headlights.target = headlightAim;
+const lightRig = new THREE.Group();
+lightRig.add(headlights, headlightAim);
+scene.add(lightRig);
 const camera = new THREE.PerspectiveCamera(60, 1, 0.03, 3000);
 const chaseCam = { pos: new THREE.Vector3(), yaw: 0, ready: false };
 let car = new Car(model.spec);
@@ -225,10 +246,13 @@ function cycleCamera() {
 
 function resetRun() {
   car.reset();
-  const p = road.sampleAt(road.startS - 18);
+  // Start parked up in the lot beside the start line, pointing down the road.
+  const lot = road.lots[0];
+  const p = roadPoint(road, lot.s0 + 16, lot.side * (road.wallOffset + 3.4));
   chassis.place(p.x, p.z, p.yaw);
-  roadIndex = Math.round(p.s / SAMPLE_STEP);
-  roadS = p.s;
+  const loc = road.locate(p.x, p.z);
+  roadIndex = loc.index;
+  roadS = loc.s;
   scorer.reset();
   run = 'idle';
   runTime = 0;
@@ -246,9 +270,13 @@ function resize() {
   graphics.setSize(w, h);
   camera.aspect = w / h;
   // The setting is for landscape screens; portrait needs a wider view to see the road.
-  camera.fov = Math.min(110, progress.settings.fov + (w / h < 1 ? 20 : 0));
+  baseFov = Math.min(110, progress.settings.fov + (w / h < 1 ? 20 : 0));
+  camera.fov = baseFov + speedFov;
   camera.updateProjectionMatrix();
 }
+let baseFov = 60;
+/** Extra field of view at speed, eased so it breathes with the throttle rather than jumping. */
+let speedFov = 0;
 window.addEventListener('resize', resize);
 resize();
 
@@ -282,6 +310,8 @@ function frame(now: number) {
   const nav = input.nav(dt);
   const pad = input.gamepad();
 
+  updateDay(menus.isOpen ? 0 : dt);
+
   // Menus pause the world: no physics, no engine sound, no rumble.
   audio.setMuted(menus.isOpen);
   document.body.classList.toggle('in-menu', menus.isOpen);
@@ -293,6 +323,10 @@ function frame(now: number) {
       showroom.control(pad, dt);
       showroom.render(renderer, dt, window.innerWidth / window.innerHeight);
     } else {
+      // The main menu's "Your ride" tile shows the car on its turntable: draw it into a corner
+      // of the main canvas, copy that into the tile, then draw the world over it.
+      const tile = menus.rideCanvas();
+      if (tile) drawRide(tile, dt);
       graphics.render(camera);
     }
     return;
@@ -387,6 +421,8 @@ function frame(now: number) {
   root.rotation.set(pitch, chassis.yaw, roll, 'YXZ');
   exterior.group.position.set(chassis.x, loc.h, chassis.z);
   exterior.group.rotation.copy(root.rotation);
+  lightRig.position.copy(exterior.group.position);
+  lightRig.rotation.copy(root.rotation);
   if (progress.settings.camera === 'chase') updateChaseCamera(dt, loc.h);
 
   cockpit.wheel.rotation.z = Math.max(-7.8, Math.min(7.8, chassis.steerAngle * 14));
@@ -410,6 +446,20 @@ function frame(now: number) {
   );
   cockpit.head.rotation.x = Math.max(-0.04, Math.min(0.04, car.accel * 0.004));
 
+  // Speed effects: the view widens and shivers a touch as the speed builds.
+  const fast = progress.settings.speedFx ? Math.max(0, Math.abs(car.speed) - 8) / 30 : 0;
+  const wantFov = Math.min(1, fast) * 9;
+  speedFov += (wantFov - speedFov) * Math.min(1, dt * 2.5);
+  if (Math.abs(camera.fov - (baseFov + speedFov)) > 0.01) {
+    camera.fov = baseFov + speedFov;
+    camera.updateProjectionMatrix();
+  }
+  if (fast > 0) {
+    const buzz = Math.min(1, fast) ** 2 * 0.0025;
+    cockpit.head.position.x += (Math.random() - 0.5) * buzz;
+    cockpit.head.position.y += (Math.random() - 0.5) * buzz;
+  }
+
   drawCluster(cockpit.clusterCanvas, car, time, progress.settings.units, model.body.design);
   cockpit.cluster.needsUpdate = true;
 
@@ -418,6 +468,20 @@ function frame(now: number) {
   shadowFocus.set(chassis.x - Math.sin(chassis.yaw) * 14, loc.h, chassis.z - Math.cos(chassis.yaw) * 14);
   graphics.follow(shadowFocus);
   graphics.render(camera);
+}
+
+function drawRide(tile: HTMLCanvasElement, dt: number) {
+  const pr = renderer.getPixelRatio();
+  const w = Math.round(tile.clientWidth * pr);
+  const h = Math.round(tile.clientHeight * pr);
+  if (w < 2 || h < 2) return;
+  if (tile.width !== w || tile.height !== h) {
+    tile.width = w;
+    tile.height = h;
+  }
+  const rect = { left: 0, top: 0, width: tile.clientWidth, height: tile.clientHeight };
+  showroom.renderInto(renderer, dt, rect);
+  tile.getContext('2d')?.drawImage(renderer.domElement, 0, 0, w, h, 0, 0, w, h);
 }
 
 /** A camera that trails the car, lagging a little in yaw so corners are readable. */
@@ -578,4 +642,5 @@ requestAnimationFrame(frame);
   applySettings,
   graphics,
   showroom,
+  day,
 };

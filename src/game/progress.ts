@@ -14,7 +14,12 @@ export interface Settings {
   speedo: SpeedoMode; // on-screen speedo; auto = only when the dash is out of view
   bindings: Bindings;
   clutchFeel: boolean; // DualSense adaptive trigger pushes back at the bite point
+  timeOfDay: TimeOfDay; // cycle = the sun moves while you drive
+  speedFx: boolean; // field of view widens and the view shivers a little at speed
 }
+
+export type TimeOfDay = 'cycle' | 'morning' | 'noon' | 'sunset' | 'night';
+export const TIMES_OF_DAY: TimeOfDay[] = ['cycle', 'morning', 'noon', 'sunset', 'night'];
 
 export type SpeedoMode = 'auto' | 'on' | 'off';
 export const SPEEDO_MODES: SpeedoMode[] = ['auto', 'on', 'off'];
@@ -48,7 +53,7 @@ export interface Progress {
 
 const KEY = 'upshift.progress.v1';
 
-export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high', speedo: 'auto', bindings: defaultBindings(), clutchFeel: true };
+export const DEFAULT_SETTINGS: Settings = { rumble: 1, volume: 0.8, units: 'kmh', hints: true, camera: 'cockpit', fov: 60, graphics: 'high', speedo: 'auto', bindings: defaultBindings(), clutchFeel: true, timeOfDay: 'cycle', speedFx: true };
 
 export function defaultProgress(): Progress {
   return {
@@ -112,6 +117,8 @@ export function parseProgress(raw: string | null): Progress {
       speedo: SPEEDO_MODES.includes(st.speedo) ? st.speedo : DEFAULT_SETTINGS.speedo,
       bindings: parseBindings(st.bindings),
       clutchFeel: typeof st.clutchFeel === 'boolean' ? st.clutchFeel : true,
+      timeOfDay: TIMES_OF_DAY.includes(st.timeOfDay) ? st.timeOfDay : DEFAULT_SETTINGS.timeOfDay,
+      speedFx: typeof st.speedFx === 'boolean' ? st.speedFx : true,
     };
   } catch {
     // Corrupt data: start fresh rather than crash.

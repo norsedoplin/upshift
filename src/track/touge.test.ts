@@ -42,4 +42,13 @@ describe('touge generator', () => {
     const cold = road.locate(p.x - lx * 3, p.z - lz * 3);
     expect(cold.offset).toBeCloseTo(-3, 1);
   });
+
+  it('has a lot at the start and more along the way', () => {
+    expect(road.lots.length).toBeGreaterThanOrEqual(4);
+    expect(road.lots[0].s1).toBeLessThan(road.startS);
+    const l = road.lots[1];
+    expect(road.lotDepth((l.s0 + l.s1) / 2, l.side)).toBe(l.depth);
+    expect(road.lotDepth((l.s0 + l.s1) / 2, -l.side)).toBe(0);
+    expect(road.lotDepth(l.s0 + 5, l.side)).toBeCloseTo(l.depth / 2);
+  });
 });

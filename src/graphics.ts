@@ -52,14 +52,16 @@ export class Graphics {
   private size = new THREE.Vector2(1, 1);
   private lightRight = new THREE.Vector3();
   private lightUp = new THREE.Vector3();
+  private sunDir: THREE.Vector3;
 
   constructor(
     private renderer: THREE.WebGLRenderer,
     private scene: THREE.Scene,
     private sun: THREE.DirectionalLight,
     /** Direction from the ground towards the sun. */
-    private sunDir: THREE.Vector3,
+    sunDir: THREE.Vector3,
   ) {
+    this.sunDir = sunDir.clone();
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
@@ -75,8 +77,14 @@ export class Graphics {
     scene.add(sun.target);
 
     // An orthonormal basis facing along the light, for snapping the shadow to texels.
-    this.lightRight.crossVectors(new THREE.Vector3(0, 1, 0), sunDir).normalize();
-    this.lightUp.crossVectors(sunDir, this.lightRight).normalize();
+    this.setSunDir(sunDir);
+  }
+
+  /** The sun (or moon) moved: re-aim the shadows. */
+  setSunDir(dir: THREE.Vector3) {
+    this.sunDir.copy(dir);
+    this.lightRight.crossVectors(new THREE.Vector3(0, 1, 0), this.sunDir).normalize();
+    this.lightUp.crossVectors(this.sunDir, this.lightRight).normalize();
   }
 
   setQuality(q: GraphicsQuality) {
@@ -151,10 +159,11 @@ export class Graphics {
   }
 }
 
+let pmrem: THREE.PMREMGenerator | null = null;
+
 /** Bake a sky-and-ground scene into a prefiltered map for reflections and ambient light. */
-export function bakeEnvironment(renderer: THREE.WebGLRenderer, envScene: THREE.Scene) {
-  const pm = new THREE.PMREMGenerator(renderer);
-  const tex = pm.fromScene(envScene, 0, 0.1, 500).texture;
-  pm.dispose();
-  return tex;
+export function bakeEnvironment(renderer: THREE.WebGLRenderer, envScene: THREE.Scene, previous?: THREE.WebGLRenderTarget | null) {
+  pmrem ??= new THREE.PMREMGenerator(renderer);
+  previous?.dispose();
+  return pmrem.fromScene(envScene, 0, 0.1, 500);
 }

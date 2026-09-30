@@ -15,13 +15,17 @@ import {
   type PadInput,
 } from '../bindings';
 import type { Progress, Settings } from '../game/progress';
-import { GRAPHICS_QUALITIES, SPEEDO_MODES, saveProgress } from '../game/progress';
+import { GRAPHICS_QUALITIES, SPEEDO_MODES, TIMES_OF_DAY, saveProgress } from '../game/progress';
 import { chooseCar, choosePaint, ownsCar, ownsPaint, paintFor } from '../game/shop';
 import type { RunStats } from '../game/scoring';
 
 const SETTINGS_TABS = ['Controller', 'View', 'Game'] as const;
 
-export type Screen = 'title' | 'main' | 'garage' | 'settings' | 'controls' | 'pause' | 'summary';
+export type Screen = 'title' | 'main' | 'garage' | 'settings' | 'controls' | 'pause' | 'summary' | 'help';
+
+/** Screens with the navigation bar across the top. */
+const NAV_SCREENS: Screen[] = ['main', 'garage', 'settings', 'controls', 'help'];
+const TIME_LABELS = ['Day cycle', 'Morning', 'Noon', 'Sunset', 'Night'];
 
 interface Item {
   el: HTMLElement;
@@ -63,6 +67,7 @@ export class Menus {
   private focusIndex = 0;
   private settingsReturn: Screen = 'main';
   private garageReturn: Screen = 'main';
+  private controlsReturn: Screen = 'settings';
   private lastSummary: { stats: RunStats; earned: number; best: boolean; time: string } | null = null;
   private status = '';
   private rumbleResult = '';
@@ -101,11 +106,12 @@ export class Menus {
   open(screen: Screen | null) {
     if (screen === 'garage' && this.screen && this.screen !== 'garage' && this.screen !== 'settings') this.garageReturn = this.screen;
     if (screen === 'settings' && this.screen && this.screen !== 'settings' && this.screen !== 'controls') this.settingsReturn = this.screen;
+    if (screen === 'controls' && this.screen && this.screen !== 'controls') this.controlsReturn = this.screen;
     if (this.capturing) {
       this.capturing = null;
       this.hooks.cancelCapture();
     }
-    if (this.screen === 'garage' && screen !== 'garage') this.hooks.preview(null, null);
+    if ((this.screen === 'garage' || this.screen === 'main') && screen !== this.screen) this.hooks.preview(null, null);
     this.screen = screen;
     this.status = '';
     this.settle = true;
@@ -163,6 +169,10 @@ export class Menus {
         this.open(this.settingsReturn);
         break;
       case 'controls':
+        if (this.controlsReturn !== 'settings') {
+          this.open(this.controlsReturn);
+          break;
+        }
         this.settingsTab = 0;
         this.open('settings');
         this.focusOnLabel('Controls›');
@@ -172,6 +182,9 @@ export class Menus {
         break;
       case 'summary':
         this.hooks.restart();
+        break;
+      case 'help':
+        this.open('main');
         break;
       default:
         break;
@@ -262,7 +275,12 @@ export class Menus {
       case 'summary':
         this.renderSummary(panel);
         break;
+      case 'help':
+        this.renderHelp(panel);
+        break;
     }
+    // The bar's items go in last so each screen's own items keep their indices.
+    if (NAV_SCREENS.includes(this.screen)) this.root.prepend(this.navBar());
     if (this.items.length) this.setFocus(Math.min(this.focusIndex, this.items.length - 1));
   }
 
@@ -280,31 +298,135 @@ export class Menus {
     );
   }
 
+  /** Logo, the three main sections, and your creds, across the top of the screen. */
+  private navBar() {
+    const bar = h('div', 'nav-bar');
+    const logo = h('div', 'nav-logo', 'UpShift');
+    const tabs = h('div', 'nav-tabs');
+    const sections: [string, Screen][] = [
+      ['Drive', 'main'],
+      ['Garage', 'garage'],
+      ['Settings', 'settings'],
+    ];
+    const active = this.screen === 'controls' ? 'settings' : this.screen === 'help' ? 'main' : this.screen;
+    sections.forEach(([label, screen], i) => {
+      const t = h('div', `menu-btn nav-tab${screen === active ? ' active' : ''}`, label);
+      this.add(t, -1, i, { confirm: () => screen !== this.screen && this.open(screen) });
+      tabs.append(t);
+    });
+    const p = this.progress;
+    const chip = h('div', 'nav-chip');
+    const car = carById(p.car);
+    chip.append(h('span', 'chip-car', car.name), h('span', 'chip-best', `Best ${p.bestScore.toLocaleString()}`), h('b', 'chip-creds', `◆ ${p.creds.toLocaleString()}`));
+    bar.append(logo, tabs, chip);
+    return bar;
+  }
+
+  /** A big clickable card: a small label, a title, a line under it and an optional call to action. */
+  private tile(cls: string, label: string, title: string, sub: string, row: number, col: number, opts: Omit<Item, 'el' | 'row' | 'col'>, cta?: string) {
+    const el = h('div', `menu-btn tile ${cls}`);
+    el.append(h('span', 'tile-label', label), h('span', 'tile-title', title), h('span', 'tile-sub', sub));
+    if (cta) el.append(h('span', 'tile-cta', cta));
+    this.add(el, row, col, opts);
+    return el;
+  }
+
+  /** The main menu's canvas for the turning car, if it's showing. */
+  rideCanvas(): HTMLCanvasElement | null {
+    return this.screen === 'main' ? this.root.querySelector<HTMLCanvasElement>('canvas.ride-view') : null;
+  }
+
   private renderMain(panel: HTMLElement) {
-    const car = carById(this.progress.car);
-    panel.append(h('h1', 'logo', 'UpShift'), this.credsLine());
-    const info = h('p', 'muted', `Driving the ${car.name} · best run ${this.progress.bestScore.toLocaleString()}`);
-    panel.append(info);
-    const list = h('div', 'menu-list');
-    list.append(
-      this.button('Drive the touge', 0, () => this.hooks.drive(), 'menu-btn primary'),
-      this.button('Garage', 1, () => this.open('garage')),
-      this.button('Settings', 2, () => this.open('settings')),
+    const p = this.progress;
+    const st = p.settings;
+    const car = carById(p.car);
+    const paint = paintFor(p, car.id);
+    panel.className = 'menu-hub';
+    this.hooks.preview(car, paint.color);
+
+    const grid = h('div', 'hub-grid');
+    // Items are added in focus order: the hero first, so it's where the cursor starts.
+    const hero = this.tile(
+      'hero',
+      'Touge run',
+      'Drive the touge',
+      '4.4 km downhill, hairpins and all. Pull into a lot any time to take a breather.',
+      0,
+      1,
+      { confirm: () => this.hooks.drive() },
+      "Let's drive  ›",
     );
-    panel.append(list, this.controlsHint());
+    hero.prepend(h('div', 'hero-art'));
+
+    const ride = h('div', 'menu-btn tile ride');
+    ride.append(h('span', 'tile-label', 'Your ride'), h('canvas', 'ride-view'));
+    const info = h('div', 'ride-info');
+    info.append(h('span', 'tile-title', car.name), h('span', 'tile-sub', `${car.stats.drive} · ${Object.keys(car.spec.gears).length - 1}-speed · ${paint.name}`));
+    ride.append(info, h('span', 'tile-cta', 'Customize  ›'));
+    const rideItem = this.add(ride, 0, 0, { confirm: () => this.open('garage') });
+    const toRide = () => this.setFocus(this.items.indexOf(rideItem));
+
+    const garage = this.tile('garage', 'Garage', 'Cars and paint', `${p.ownedCars.length} of ${CARS.length} cars owned`, 1, 1, { confirm: () => this.open('garage'), left: toRide });
+    const ti = TIMES_OF_DAY.indexOf(st.timeOfDay);
+    const setTime = (i: number) => {
+      st.timeOfDay = TIMES_OF_DAY[(i + TIMES_OF_DAY.length) % TIMES_OF_DAY.length];
+      saveProgress(p);
+      this.hooks.settingsChanged();
+      this.rerenderKeepingFocus();
+    };
+    const time = this.tile('time', 'Time of day', `‹ ${TIME_LABELS[ti]} ›`, 'Left and right to change', 1, 2, {
+      left: () => setTime(ti - 1),
+      right: () => setTime(ti + 1),
+      confirm: () => setTime(ti + 1),
+    });
+    const controls = this.tile('controls', 'Controls', 'Buttons and keys', 'Rebind anything', 2, 1, { confirm: () => this.open('controls'), left: toRide });
+    const help = this.tile('help', 'Lessons', 'How to drive stick', 'Bite point, rev-matching, heel-toe', 2, 2, { confirm: () => this.open('help') });
+    grid.append(ride, hero, garage, time, controls, help);
+
+    const foot = h('div', 'hub-foot');
+    foot.append(
+      h('span', undefined, 'UpShift · a manual car on a mountain road'),
+      h('span', undefined, '✕ / Enter select · ○ / Esc back · D-pad or stick to move'),
+      h('span', undefined, `${p.runs} run${p.runs === 1 ? '' : 's'} driven`),
+    );
+    panel.append(grid, foot);
   }
 
   private renderPause(panel: HTMLElement) {
-    panel.append(h('h2', undefined, 'Paused'));
-    const list = h('div', 'menu-list');
-    list.append(
-      this.button('Resume', 0, () => this.hooks.resume(), 'menu-btn primary'),
-      this.button('Restart run', 1, () => this.hooks.restart()),
-      this.button('Garage', 2, () => this.open('garage')),
-      this.button('Settings', 3, () => this.open('settings')),
-      this.button('Main menu', 4, () => this.hooks.toMenu()),
+    panel.className = 'menu-hub pause-hub';
+    const grid = h('div', 'hub-grid pause-grid');
+    const head = h('div', 'pause-head');
+    head.append(h('span', 'tile-label', 'Paused'), h('span', 'pause-car', carById(this.progress.car).name));
+    const resume = this.tile('hero', 'Keep going', 'Resume', 'Back on the road where you left it', 0, 0, { confirm: () => this.hooks.resume() }, 'Resume  ›');
+    grid.append(
+      resume,
+      this.tile('restart', 'Run', 'Restart', 'Back to the lot at the start', 1, 0, { confirm: () => this.hooks.restart() }),
+      this.tile('garage', 'Garage', 'Cars and paint', 'Swap car or colour', 1, 1, { confirm: () => this.open('garage') }),
+      this.tile('controls', 'Settings', 'Settings', 'Controller, view and game', 2, 0, { confirm: () => this.open('settings') }),
+      this.tile('help', 'Menu', 'Main menu', 'Leave this run', 2, 1, { confirm: () => this.hooks.toMenu() }),
     );
-    panel.append(list, this.controlsHint());
+    panel.append(head, grid, this.controlsHint());
+  }
+
+  private renderHelp(panel: HTMLElement) {
+    panel.append(h('h2', undefined, 'How to drive stick'));
+    const lessons: [string, string][] = [
+      ['Pulling away', 'Clutch all the way in, first gear, then let the clutch out slowly. Feel for the rumble (and, on a DualSense, the trigger pushing back): that is the bite point. Add a little gas as it bites.'],
+      ['Shifting', 'Clutch in, change gear, clutch out. Lift off the gas while you shift. Smooth, quick changes build your combo.'],
+      ['Rev-matching', 'Going down a gear, blip the gas with the clutch in so the revs rise to where the lower gear wants them. A match is a clean shift; a miss jolts the car.'],
+      ['Heel-toe', 'Braking into a corner, keep braking while you blip the gas for the downshift. It earns the biggest bonus.'],
+      ['Lots', 'The paved pull-offs along the road are for stopping, parking up and watching the sun go down. The clock keeps running, though.'],
+      ['What costs points', 'Stalling, grinding a gear, and hitting the rails.'],
+    ];
+    const list = h('div', 'help-list');
+    for (const [title, text] of lessons) {
+      const card = h('div', 'help-card');
+      card.append(h('b', undefined, title), h('p', undefined, text));
+      list.append(card);
+    }
+    const back = h('div', 'menu-list');
+    back.append(this.button('Back', 0, () => this.back()));
+    panel.append(list, back);
   }
 
   private renderSummary(panel: HTMLElement) {
@@ -411,6 +533,8 @@ export class Menus {
       const fovs = Array.from({ length: 11 }, (_, i) => 50 + i * 5);
       option('Field of view', row++, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
       option('On-screen speedo', row++, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
+      option('Speed effects', row++, ['On', 'Off'], st.speedFx ? 0 : 1, (i) => (st.speedFx = i === 0));
+      option('Time of day', row++, ['Day cycle', 'Morning', 'Noon', 'Sunset', 'Night'], TIMES_OF_DAY.indexOf(st.timeOfDay), (i) => (st.timeOfDay = TIMES_OF_DAY[i]));
       option('Graphics', row++, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
     } else {
       option('Volume', row++, pctLabels, nearest(st.volume), (i) => (st.volume = pct[i]));
