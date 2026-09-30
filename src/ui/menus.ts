@@ -29,6 +29,7 @@ export interface MenuHooks {
   carChanged(): void;
   settingsChanged(): void;
   preview(car: CarModel | null, paint: string | null): void; // garage showroom
+  testRumble(): Promise<string>;
 }
 
 const h = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) => {
@@ -47,6 +48,7 @@ export class Menus {
   private garageReturn: Screen = 'main';
   private lastSummary: { stats: RunStats; earned: number; best: boolean; time: string } | null = null;
   private status = '';
+  private rumbleResult = '';
   // Swallow input for one frame after a screen change, so one press can't act twice.
   private settle = false;
 
@@ -315,16 +317,29 @@ export class Menus {
     const pctLabels = ['Off', '25%', '50%', '75%', '100%'];
     const nearest = (v: number) => pct.reduce((b, x, i) => (Math.abs(x - v) < Math.abs(pct[b] - v) ? i : b), 0);
     option('Controller rumble', 0, pctLabels, nearest(st.rumble), (i) => (st.rumble = pct[i]));
-    option('Volume', 1, pctLabels, nearest(st.volume), (i) => (st.volume = pct[i]));
-    option('Speed units', 2, ['km/h', 'mph'], st.units === 'kmh' ? 0 : 1, (i) => (st.units = i === 0 ? 'kmh' : 'mph'));
+    const test = h('div', 'menu-btn setting');
+    const result = h('span', 'value', this.rumbleResult || 'Press ✕');
+    test.append(h('span', undefined, 'Test rumble'), result);
+    this.add(test, 1, 0, {
+      confirm: () => {
+        result.textContent = '…';
+        void this.hooks.testRumble().then((msg) => {
+          this.rumbleResult = msg;
+          result.textContent = msg;
+        });
+      },
+    });
+    list.append(test);
+    option('Volume', 2, pctLabels, nearest(st.volume), (i) => (st.volume = pct[i]));
+    option('Speed units', 3, ['km/h', 'mph'], st.units === 'kmh' ? 0 : 1, (i) => (st.units = i === 0 ? 'kmh' : 'mph'));
     const views: Settings['camera'][] = ['cockpit', 'hood', 'chase'];
-    option('Camera', 3, ['Cockpit', 'Hood', 'Chase'], views.indexOf(st.camera), (i) => (st.camera = views[i]));
+    option('Camera', 4, ['Cockpit', 'Hood', 'Chase'], views.indexOf(st.camera), (i) => (st.camera = views[i]));
     const fovs = Array.from({ length: 11 }, (_, i) => 50 + i * 5);
-    option('Field of view', 4, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
-    option('Graphics', 5, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
-    option('On-screen speedo', 6, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
-    option('Control hints', 7, ['On', 'Off'], st.hints ? 0 : 1, (i) => (st.hints = i === 0));
-    list.append(this.button('Back', 8, () => this.back()));
+    option('Field of view', 5, fovs.map((f) => `${f}°`), Math.max(0, fovs.indexOf(st.fov)), (i) => (st.fov = fovs[i]));
+    option('Graphics', 6, ['Low', 'Medium', 'High'], GRAPHICS_QUALITIES.indexOf(st.graphics), (i) => (st.graphics = GRAPHICS_QUALITIES[i]));
+    option('On-screen speedo', 7, ['Auto', 'On', 'Off'], SPEEDO_MODES.indexOf(st.speedo), (i) => (st.speedo = SPEEDO_MODES[i]));
+    option('Control hints', 8, ['On', 'Off'], st.hints ? 0 : 1, (i) => (st.hints = i === 0));
+    list.append(this.button('Back', 9, () => this.back()));
     panel.append(list, this.controlsHint());
   }
 

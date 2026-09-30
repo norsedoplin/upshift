@@ -84,6 +84,20 @@ export class Haptics {
     }
   }
 
+  /** Plays one strong pulse and says what happened, so players can tell whether their browser can rumble. */
+  async test(pad: Gamepad | null): Promise<string> {
+    if (!pad) return 'No controller yet';
+    const act = (pad as unknown as { vibrationActuator?: Actuator }).vibrationActuator;
+    if (!act?.playEffect) return 'Not in this browser';
+    try {
+      const r = await act.playEffect('dual-rumble', { startDelay: 0, duration: 700, strongMagnitude: 1, weakMagnitude: 1 });
+      return r === 'complete' || r === 'preempted' ? 'Sent: felt it?' : `Result: ${r}`;
+    } catch (e) {
+      console.warn('Rumble test failed', e);
+      return 'Failed';
+    }
+  }
+
   stop(pad: Gamepad | null) {
     const act = (pad as unknown as { vibrationActuator?: Actuator } | null)?.vibrationActuator;
     act?.reset?.().catch(() => {});

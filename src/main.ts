@@ -85,6 +85,7 @@ const menus = new Menus(progress, {
     menus.open('main');
   },
   carChanged: () => applyCar(),
+  testRumble: () => haptics.test(input.gamepad()),
   settingsChanged: () => applySettings(),
   preview: (m, paint) => {
     if (m && paint) {
