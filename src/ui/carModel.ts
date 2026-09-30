@@ -18,6 +18,8 @@ type UV = [number, number]; // (u along the length from the nose 0..1, v = heigh
 export interface CarModelOptions {
   /** Pop-up headlights raised (the garage shows them up; on the road they're down). */
   lightsUp?: boolean;
+  /** Fewer facets on the round parts, for the many parked cars in town. */
+  low?: boolean;
 }
 
 interface Kit {
@@ -571,9 +573,10 @@ export function buildCarModel(body: BodyShape, paint: THREE.Color, opts: CarMode
     const r = rimR * 0.98 + (R - rimR * 0.98) * Math.sin(a) ** 0.35;
     tyreProfile.push(new THREE.Vector2(r, (-Math.cos(a) * tyreW) / 2));
   }
-  const tyre = new THREE.LatheGeometry(tyreProfile, 36).rotateZ(Math.PI / 2);
-  const rimDisc = new THREE.CylinderGeometry(rimR, rimR, 0.02, 32).rotateZ(Math.PI / 2);
-  const lip = new THREE.TorusGeometry(rimR, 0.014, 6, 36).rotateY(Math.PI / 2);
+  const seg = opts.low ? 12 : 36;
+  const tyre = new THREE.LatheGeometry(opts.low ? tyreProfile.filter((_, i) => i % 3 === 0 || i === 12) : tyreProfile, seg).rotateZ(Math.PI / 2);
+  const rimDisc = new THREE.CylinderGeometry(rimR, rimR, 0.02, opts.low ? 12 : 32).rotateZ(Math.PI / 2);
+  const lip = new THREE.TorusGeometry(rimR, 0.014, opts.low ? 3 : 6, seg).rotateY(Math.PI / 2);
   const cap = new THREE.CylinderGeometry(R * 0.13, R * 0.13, 0.03, 16).rotateZ(Math.PI / 2);
   const spoke = new THREE.BoxGeometry(0.02, rimR * 0.9, d.spokeWidth);
   const arch = new THREE.CircleGeometry(R * 1.24, 28, 0, Math.PI);

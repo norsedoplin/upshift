@@ -107,7 +107,7 @@ export class Terrain {
 }
 
 export interface Scenery {
-  terrain: Terrain;
+  terrain?: Terrain;
   trees: THREE.Object3D;
   sun: THREE.DirectionalLight;
   /** Sky and ground only, baked into reflections. */
@@ -117,7 +117,7 @@ export interface Scenery {
 
 /** Direction from the ground towards the sun: a warm mid-afternoon sun, low enough for long shadows. */
 export const SUN_DIR = new THREE.Vector3(-0.55, 0.62, 0.42).normalize();
-const SUN_COLOR = new THREE.Color('#ffe6c4');
+export const SUN_COLOR = new THREE.Color('#ffe6c4');
 
 export function buildScenery(scene: THREE.Scene, road: Road): Scenery {
   scene.background = COLORS.skyHorizon.clone();
@@ -175,7 +175,7 @@ export function buildScenery(scene: THREE.Scene, road: Road): Scenery {
 }
 
 /** A small scene of just sky and ground, baked into reflections and ambient light. */
-function buildEnvironmentScene() {
+export function buildEnvironmentScene() {
   const scene = new THREE.Scene();
   const sky = skyMaterial();
   scene.add(new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), sky));
@@ -186,7 +186,7 @@ function buildEnvironmentScene() {
   return { scene, sky, ground };
 }
 
-interface Bounds {
+export interface Bounds {
   minX: number;
   maxX: number;
   minZ: number;
@@ -253,7 +253,7 @@ function skyMaterial() {
   });
 }
 
-function buildSky() {
+export function buildSky() {
   const sky = new THREE.Mesh(new THREE.SphereGeometry(2600, 32, 16), skyMaterial());
   sky.renderOrder = -1;
   sky.frustumCulled = false;
@@ -1002,7 +1002,7 @@ function buildGantry(road: Road, s: number, label: string) {
   return g;
 }
 
-function buildMountains(b: Bounds) {
+export function buildMountains(b: Bounds) {
   const group = new THREE.Group();
   const cx = (b.minX + b.maxX) / 2;
   const cz = (b.minZ + b.maxZ) / 2;
@@ -1084,7 +1084,7 @@ function craggy(geo: THREE.BufferGeometry, seed: number, amount = 0.12) {
 }
 
 /** Soft low-poly clouds drifting high over the far hills. */
-function buildClouds(b: Bounds) {
+export function buildClouds(b: Bounds) {
   const geo = new THREE.IcosahedronGeometry(1, 3);
   const mat = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#dfe6ee', emissiveIntensity: 0.3, flatShading: true, fog: false, roughness: 1, envMapIntensity: 0.3 });
   const puffs: THREE.Matrix4[] = [];
