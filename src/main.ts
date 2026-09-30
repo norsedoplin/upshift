@@ -412,6 +412,7 @@ let last = performance.now();
 let simAccumulator = 0;
 let time = 0;
 let pitch = 0;
+const charmSwing = { x: 0, z: 0, vx: 0, vz: 0 };
 let grade = 0;
 let driveTime = 0;
 const shadowFocus = new THREE.Vector3();
@@ -571,6 +572,12 @@ function frame(now: number) {
   if (progress.settings.camera === 'chase') updateChaseCamera(dt, loc.h);
 
   cockpit.wheel.rotation.z = Math.max(-7.8, Math.min(7.8, chassis.steerAngle * 14));
+  // The charm on the mirror swings out through corners and nods under braking.
+  charmSwing.vz += (chassis.latAccel * 2.2 - charmSwing.z * 30 - charmSwing.vz * 2.2) * dt;
+  charmSwing.z += charmSwing.vz * dt;
+  charmSwing.vx += (-car.accel * 2.0 - charmSwing.x * 30 - charmSwing.vx * 2.2) * dt;
+  charmSwing.x += charmSwing.vx * dt;
+  cockpit.charm.rotation.set(Math.max(-0.8, Math.min(0.8, charmSwing.x)), 0, Math.max(-0.9, Math.min(0.9, charmSwing.z)));
   moveShifter(dt);
   cockpit.clutchPedal.rotation.x = -c.clutch * 0.5;
   cockpit.brakePedal.rotation.x = -c.brake * 0.4;
@@ -588,7 +595,8 @@ function frame(now: number) {
     eye.y + (Math.random() - 0.5) * shake,
     eye.z + Math.max(-0.05, Math.min(0.09, car.accel * 0.011)),
   );
-  cockpit.head.rotation.x = Math.max(-0.05, Math.min(0.06, car.accel * 0.007));
+  // Eyes a touch down the road (over the wheel rim), nodding with the acceleration.
+  cockpit.head.rotation.x = -0.05 + Math.max(-0.05, Math.min(0.06, car.accel * 0.007));
 
   // Pull: how hard the car is shoving you into the seat. It widens the view, and when the
   // turbo is on boost the whole car shudders with it.
