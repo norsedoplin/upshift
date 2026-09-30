@@ -6,7 +6,7 @@ import { Input } from './input';
 import { Haptics } from './haptics';
 import { EngineAudio } from './audio';
 import { buildCockpit, shifterPose } from './cockpit';
-import { drawCluster, gearLabel } from './gauges';
+import { drawCluster, drawSpeedo, gearLabel } from './gauges';
 import { generateTouge, SAMPLE_STEP } from './track/touge';
 import { buildScenery, buildEnvironmentScene, SUN_DIR } from './track/scenery';
 import { Graphics, bakeEnvironment } from './graphics';
@@ -57,7 +57,7 @@ const biteCanvas = $('bite') as HTMLCanvasElement;
 const padStatus = $('pad-status');
 const pedals = { clutch: $('bar-clutch'), brake: $('bar-brake'), throttle: $('bar-throttle') };
 const hint = $('hint');
-const miniHud = { root: $('minihud'), gear: $('mini-gear'), speed: $('mini-speed'), rpm: $('mini-rpm') };
+const speedo = $('speedo') as HTMLCanvasElement;
 const hud = { score: $('score'), combo: $('combo'), creds: $('creds'), timer: $('timer'), progress: $('progress-fill') };
 const toasts = $('toasts');
 
@@ -347,7 +347,7 @@ function frame(now: number) {
   );
   cockpit.head.rotation.x = Math.max(-0.04, Math.min(0.04, car.accel * 0.004));
 
-  drawCluster(cockpit.clusterCanvas, car, time, progress.settings.units);
+  drawCluster(cockpit.clusterCanvas, car, time, progress.settings.units, model.body.design);
   cockpit.cluster.needsUpdate = true;
 
   updateHud(c.clutch, c.brake, c.throttle, pad, s);
@@ -431,17 +431,11 @@ function updateHud(clutch: number, brake: number, throttle: number, pad: Gamepad
     : 'No controller: press any button on it';
   hint.classList.toggle('hidden', !progress.settings.hints || driveTime > 25);
 
-  // Outside the cockpit you can't see the gauges, so show the essentials on screen.
-  const outside = progress.settings.camera !== 'cockpit';
-  miniHud.root.classList.toggle('hidden', !outside);
-  if (outside) {
-    const mph = progress.settings.units === 'mph';
-    miniHud.gear.textContent = gearLabel(car.gear);
-    miniHud.speed.textContent = `${Math.round(Math.abs(car.speed) * (mph ? 2.23694 : 3.6))} ${mph ? 'mph' : 'km/h'}`;
-    const frac = Math.min(1, car.rpm / car.spec.revLimit);
-    miniHud.rpm.style.width = `${frac * 100}%`;
-    miniHud.rpm.classList.toggle('redline', frac > 0.9);
-  }
+  // Outside the cockpit you can't see the gauges, so Auto shows the speedo on screen there.
+  const mode = progress.settings.speedo;
+  const showSpeedo = mode === 'on' || (mode === 'auto' && progress.settings.camera !== 'cockpit');
+  speedo.classList.toggle('hidden', !showSpeedo);
+  if (showSpeedo) drawSpeedo(speedo, car, performance.now() / 1000, progress.settings.units);
 
   if (debugOn) {
     const speedFactor = progress.settings.units === 'mph' ? 2.23694 : 3.6;
@@ -512,4 +506,5 @@ requestAnimationFrame(frame);
   applyCar,
   applySettings,
   graphics,
+  showroom,
 };

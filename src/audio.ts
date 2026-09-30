@@ -1,6 +1,7 @@
 // Synthesized engine sound. No samples: a harmonic-rich oscillator locked to crank speed,
 // shaped by load, plus intake noise, starter whine, wind and gear grind.
 
+import type { EngineSound } from './cars';
 import type { Car } from './sim/car';
 
 export class EngineAudio {
@@ -24,7 +25,7 @@ export class EngineAudio {
   private squealGain!: GainNode;
   volume = 0.8;
   private muted = false;
-  private cylinders: 4 | 6 = 4;
+  private cylinders: EngineSound = 4;
 
   start() {
     if (this.ctx) {
@@ -172,7 +173,7 @@ export class EngineAudio {
   }
 
   /** Change the engine's character (firing order) for a different car. */
-  setEngine(cylinders: 4 | 6) {
+  setEngine(cylinders: EngineSound) {
     this.cylinders = cylinders;
     if (!this.ctx) return;
     const wave = engineWave(this.ctx, cylinders);
@@ -185,11 +186,16 @@ export class EngineAudio {
  * Harmonics of crank rotation. A four fires twice per turn (2nd order dominates) with
  * half-order roughness; a straight six fires three times per turn and sounds smoother.
  */
-function engineWave(ctx: AudioContext, cylinders: 4 | 6) {
+function engineWave(ctx: AudioContext, cylinders: EngineSound) {
+  // Harmonics of the crank frequency. A four fires twice a revolution, a six three
+  // times; a twin-rotor also fires twice, but its short, sharp exhaust pulses keep
+  // the upper harmonics strong, which gives the buzzy "brap".
   const h =
     cylinders === 4
       ? [0, 0.25, 1.0, 0.18, 0.55, 0.12, 0.35, 0.06, 0.22, 0.05, 0.12, 0.03, 0.08]
-      : [0, 0.12, 0.2, 1.0, 0.1, 0.15, 0.6, 0.05, 0.1, 0.32, 0.04, 0.06, 0.18];
+      : cylinders === 6
+        ? [0, 0.12, 0.2, 1.0, 0.1, 0.15, 0.6, 0.05, 0.1, 0.32, 0.04, 0.06, 0.18]
+        : [0, 0.08, 1.0, 0.1, 0.78, 0.07, 0.66, 0.06, 0.55, 0.05, 0.46, 0.04, 0.38, 0.03, 0.3, 0.02, 0.24];
   return ctx.createPeriodicWave(new Float32Array(h.length), new Float32Array(h));
 }
 

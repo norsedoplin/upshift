@@ -83,50 +83,15 @@ body {
   background: var(--accent);
 }
 
-#minihud {
+#speedo {
   position: fixed;
-  right: 16px;
-  bottom: 40px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: var(--panel);
-  font-variant-numeric: tabular-nums;
+  right: 12px;
+  bottom: 38px;
+  width: clamp(150px, 22vmin, 220px);
+  height: clamp(150px, 22vmin, 220px);
+  pointer-events: none;
 }
-#mini-gear {
-  min-width: 26px;
-  font-size: 34px;
-  font-weight: 700;
-  line-height: 1;
-  text-align: center;
-}
-.mini-right {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 110px;
-}
-#mini-speed {
-  font-size: 16px;
-  font-weight: 600;
-}
-.mini-track {
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.12);
-  overflow: hidden;
-}
-#mini-rpm {
-  height: 100%;
-  width: 0;
-  background: var(--ink);
-}
-#mini-rpm.redline {
-  background: var(--accent);
-}
-body.in-menu #minihud {
+body.in-menu #speedo {
   display: none;
 }
 

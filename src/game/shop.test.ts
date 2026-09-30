@@ -14,10 +14,10 @@ describe('progress', () => {
   it('gives the playtest creds once, even to old saves', () => {
     const p = parseProgress(JSON.stringify({ creds: 420, bestScore: 900, runs: 3 }));
     expect(applyGrants(p)).toBe(true);
-    expect(p.creds).toBe(6420);
+    expect(p.creds).toBe(12420);
     const again = parseProgress(JSON.stringify(p));
     expect(applyGrants(again)).toBe(false);
-    expect(again.creds).toBe(6420);
+    expect(again.creds).toBe(12420);
   });
 
   it('survives garbage', () => {
@@ -29,6 +29,8 @@ describe('progress', () => {
     expect(p.settings.rumble).toBe(1);
     expect(p.settings.camera).toBe('cockpit');
     expect(p.settings.fov).toBe(60);
+    expect(p.settings.speedo).toBe('auto');
+    expect(parseProgress(JSON.stringify({ settings: { speedo: 'off' } })).settings.speedo).toBe('off');
   });
 
   it('keeps camera settings in range', () => {
