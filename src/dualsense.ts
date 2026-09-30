@@ -17,6 +17,7 @@ interface HIDDeviceLike {
   open(): Promise<void>;
   close(): Promise<void>;
   sendReport(reportId: number, data: Uint8Array): Promise<void>;
+  receiveFeatureReport(reportId: number): Promise<DataView>;
 }
 interface HIDLike {
   getDevices(): Promise<HIDDeviceLike[]>;
@@ -45,14 +46,16 @@ export function crc32(bytes: Uint8Array, seed = 0xffffffff) {
 }
 
 /** Builds the report body (without the report id) for a rumble of 0..1 on each motor. */
-export function rumbleReport(bluetooth: boolean, strong: number, weak: number, seq = 0): Uint8Array {
+export function rumbleReport(bluetooth: boolean, strong: number, weak: number, seq = 0, v2 = true): Uint8Array {
   const toByte = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
   // Common block: valid_flag0, valid_flag1, motor_right (weak), motor_left (strong), ..., valid_flag2 at 38.
   const common = new Uint8Array(47);
-  common[0] = 0x01 | 0x02; // compatible vibration + haptics select
+  // Haptics select, plus the rumble-emulation flag: in valid_flag2 on firmware from 2021 on
+  // (what Linux calls vibration v2), in valid_flag0 on older firmware.
+  common[0] = 0x02 | (v2 ? 0 : 0x01);
   common[2] = toByte(weak);
   common[3] = toByte(strong);
-  common[38] = 0x04; // compatible vibration v2, for newer firmware
+  if (v2) common[38] = 0x04;
   if (!bluetooth) {
     const data = new Uint8Array(62);
     data.set(common, 0);
@@ -75,6 +78,10 @@ export function rumbleReport(bluetooth: boolean, strong: number, weak: number, s
 export class DualSense {
   device: HIDDeviceLike | null = null;
   bluetooth = false;
+  /** Newer firmware wants the v2 rumble flag; older firmware the original one. */
+  vibrationV2 = true;
+  firmware = '';
+  lastError = '';
   private seq = 0;
   private busy = false;
   private pending: [number, number] | null = null;
@@ -113,7 +120,44 @@ export class DualSense {
     this.device = d;
     this.bluetooth = d.collections.some((c) => c.outputReports?.some((r) => r.reportId === 0x31));
     this.last = [-1, -1];
+    this.lastError = '';
+    await this.readFirmware();
     return true;
+  }
+
+  /** Feature report 0x20 carries the firmware's update version; 2.21 switched rumble to v2 (see hid-playstation). */
+  private async readFirmware() {
+    if (!this.device || this.device.productId !== 0x0ce6) return; // the Edge always uses v2
+    try {
+      const view = await this.device.receiveFeatureReport(0x20);
+      // Some platforms include the report id as byte 0, some don't.
+      const off = view.byteLength >= 64 ? 44 : 43;
+      const version = view.getUint16(off, true);
+      this.firmware = `${version >> 8}.${(version & 0xff).toString().padStart(2, '0')}`;
+      this.vibrationV2 = version >= 0x0215;
+    } catch (e) {
+      console.warn('DualSense firmware read failed', e);
+    }
+  }
+
+  /** One rumble for the settings test: sends straight away and reports any error. */
+  async pulse(strong: number, weak: number, ms: number): Promise<string> {
+    if (!this.device) return 'Not connected';
+    try {
+      await this.send(strong, weak);
+      await new Promise((r) => setTimeout(r, ms));
+      await this.send(0, 0);
+      return '';
+    } catch (e) {
+      console.warn('DualSense rumble failed', e);
+      return e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    }
+  }
+
+  private send(strong: number, weak: number) {
+    const id = this.bluetooth ? 0x31 : 0x02;
+    this.lastSent = performance.now();
+    return this.device!.sendReport(id, rumbleReport(this.bluetooth, strong, weak, this.seq++, this.vibrationV2));
   }
 
   /** Set both motors (0..1). Cheap to call every frame: it only sends when something changed. */
@@ -123,7 +167,6 @@ export class DualSense {
     const changed = Math.abs(strong - this.last[0]) > 0.02 || Math.abs(weak - this.last[1]) > 0.02;
     // Resend now and then even when steady, in case a report was dropped.
     if (!changed && now - this.lastSent < 250) return;
-    if (now - this.lastSent < 16) return;
     this.pending = [strong, weak];
     void this.flush();
   }
@@ -140,12 +183,12 @@ export class DualSense {
     const [strong, weak] = this.pending;
     this.pending = null;
     this.last = [strong, weak];
-    this.lastSent = performance.now();
     try {
-      const id = this.bluetooth ? 0x31 : 0x02;
-      await this.device.sendReport(id, rumbleReport(this.bluetooth, strong, weak, this.seq++));
+      await this.send(strong, weak);
+      this.lastError = '';
     } catch (e) {
-      console.warn('DualSense rumble failed', e);
+      if (!this.lastError) console.warn('DualSense rumble failed', e);
+      this.lastError = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
     } finally {
       this.busy = false;
     }

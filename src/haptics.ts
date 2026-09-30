@@ -98,11 +98,10 @@ export class Haptics {
   /** Plays one strong pulse and says what happened, so players can tell whether their browser can rumble. */
   async test(pad: Gamepad | null): Promise<string> {
     if (this.dualsense.connected) {
-      this.testUntil = performance.now() + 700;
-      this.dualsense.rumble(1, 1);
-      await new Promise((r) => setTimeout(r, 700));
-      this.dualsense.stop();
-      return 'Sent: felt it?';
+      this.testUntil = performance.now() + 800;
+      const err = await this.dualsense.pulse(1, 1, 700);
+      const fw = this.dualsense.firmware ? ` fw ${this.dualsense.firmware}` : '';
+      return err ? `Error: ${err}` : `Sent (${this.dualsense.vibrationV2 ? 'v2' : 'v1'}${fw}): felt it?`;
     }
     if (!pad) return 'No controller yet';
     const act = (pad as unknown as { vibrationActuator?: Actuator }).vibrationActuator;
